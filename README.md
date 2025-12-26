@@ -1,27 +1,47 @@
-# impactu_airflow
-ImpactU Airflow Dags for ETL
+# ImpactU Airflow ETL
 
-# Información sobre el servicio
+Repositorio central de DAGs de Apache Airflow para los procesos de Extracción, Transformación y Carga (ETL) del proyecto ImpactU.
 
-# Políticas de ejecución
+## 🚀 Descripción
+Este proyecto orquestaliza la recolección de datos de diversas fuentes científicas y académicas, su procesamiento mediante la herramienta [Kahi](https://github.com/colav/Kahi) y su posterior carga en sistemas de consulta como MongoDB y Elasticsearch.
 
-TODO: definir forma trabajo
+## 📂 Estructura del Proyecto
+El repositorio está organizado por etapas del ciclo de vida del dato:
 
-# Estandar de Nombrado DAG:
-## Para extracción 
-extract_db ej: extract_openalex
+*   `extract/`: Lógica de extracción para fuentes como OpenAlex, ORCID, ROR, etc.
+*   `transform/`: Procesos de transformación y normalización (Kahi).
+*   `load/`: Scripts de carga hacia destinos finales.
+*   `deploys/`: Configuraciones de despliegue por entorno (dev, prod).
+*   `backups/`: Automatización de respaldos de bases de datos.
+*   `tests/`: Pruebas de integración y calidad de datos.
 
-## Para transform
-transform_entidad  ex: transform_sources  (se provee el yml con el flujo de sources a kahi)
+## 📋 Requisitos y Arquitectura
+Para detalles sobre los principios de diseño (Checkpoints, Idempotencia, Paralelismo), consulte el documento de [Requisitos del Sistema](REQUISITOS.md).
 
-## Para load
-load_db_destination ex: load_mongodb_production, load_elasticsearch_production
+## 🛠 Estándar de Nombrado de DAGs
+Para mantener la consistencia en la interfaz de Airflow, seguimos esta convención:
 
-## Para Deploy
-deploy_service_destination  ex: deploy_mongodb_production, deploy_elasticsearch_development
+| Tipo | Formato | Ejemplo |
+| :--- | :--- | :--- |
+| **Extracción** | `extract_{fuente}` | `extract_openalex` |
+| **Transformación** | `transform_{entidad}` | `transform_sources` |
+| **Carga** | `load_{db}_{env}` | `load_mongodb_production` |
+| **Despliegue** | `deploy_{servicio}_{env}` | `deploy_mongodb_production` |
+| **Backup** | `backup_{db}_{nombre}` | `backup_mongodb_kahi` |
+| **Pruebas** | `tests_{servicio}` | `tests_kahi` |
 
-## Para Backup
-backup_db_source ex: backup_mongodb_kahi, backup_mongodb_impactu
+## ⚙️ Configuración y Desarrollo
+*(Sección en construcción)*
 
-## Para Tests 
-tests_service ex: tests_kahi, tests_backend
+### Requisitos Previos
+*   Docker & Docker Compose
+*   Apache Airflow 2.x
+*   Python 3.9+
+
+### Instalación
+1. Clonar el repositorio.
+2. Configurar las variables de entorno en un archivo `.env`.
+3. Levantar el entorno con Docker Compose.
+
+---
+**Colav - ImpactU**
