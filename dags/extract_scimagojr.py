@@ -12,7 +12,7 @@ default_args = {
     'email_on_failure': False,
     'email_on_retry': False,
     'retries': 2,
-    'retry_delay': timedelta(minutes=5),
+    'retry_delay': timedelta(hours=1),
 }
 
 def run_extraction_by_year(year, **kwargs):
@@ -47,7 +47,7 @@ with DAG(
     'extract_scimagojr',
     default_args=default_args,
     description='Extract data from ScimagoJR and load into MongoDB',
-    schedule='@yearly',
+    schedule='@monthly',
     catchup=False,
     tags=['extract', 'scimagojr'],
     params={
