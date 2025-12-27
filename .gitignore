@@ -212,3 +212,8 @@ __marimo__/
 # ImpactU Cache
 impactu/cache/
 cache/
+
+# Project specific
+logs/
+.venv/
+.env

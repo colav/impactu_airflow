@@ -11,8 +11,8 @@ The repository is organized by data lifecycle stages:
 *   `extract/`: Extraction logic for sources like OpenAlex, ORCID, ROR, etc.
 *   `transform/`: Transformation and normalization processes (Kahi).
 *   `load/`: Loading scripts to final destinations.
-*   `deploys/`: Deployment configurations per environment (dev, prod).
-*   `backups/`: Database backup automation.
+*   `deploys/`: Lógica de despliegue de servicios externos (APIs, bases de datos) mediante DAGs.
+*   `backups/`: Automatización de respaldos de bases de datos mediante DAGs.
 *   `tests/`: Integration and data quality tests.
 
 ## 📋 Requirements and Architecture
@@ -30,18 +30,18 @@ To maintain consistency in the Airflow interface, we follow this convention:
 | **Backup** | `backup_{db}_{name}` | `backup_mongodb_kahi` |
 | **Tests** | `tests_{service}` | `tests_kahi` |
 
-## ⚙️ Configuration and Development
-*(Section under construction)*
+## ⚙️ Desarrollo y Despliegue
 
-### Prerequisites
-*   Docker & Docker Compose
-*   Apache Airflow 3.1.5
-*   Python 3.12+
+Este repositorio se enfoca exclusivamente en la lógica de los DAGs y procesos ETL. La infraestructura base es provista por el repositorio **Chia**.
 
-### Installation
-1. Clone the repository.
-2. Configure environment variables in a `.env` file.
-3. Start the environment with Docker Compose.
+Para detalles sobre la estrategia de CI/CD, construcción de imágenes y gestión de entornos, consulta el documento:
+👉 **[README_DEVOPS.md](README_DEVOPS.md)**
+
+### Flujo de Trabajo Local
+1. Clonar el repositorio.
+2. Instalar dependencias: `pip install -r requirements.txt`.
+3. Desarrollar DAGs en la carpeta `dags/`.
+4. Validar integridad: `pytest tests/etl/test_dag_integrity.py`.
 
 ---
 **Colav - ImpactU**
