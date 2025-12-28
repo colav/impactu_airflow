@@ -104,6 +104,9 @@ jobs:
               "logical_date": "'$(date -u +%Y-%m-%dT%H:%M:%SZ)'",
               "conf": {
                 "pr_number": ${{ github.event.pull_request.number }},
+                "repository": "${{ github.repository }}"
+              }
+            }')
 
           HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
           BODY=$(echo "$RESPONSE" | head -n-1)
