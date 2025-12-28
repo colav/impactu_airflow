@@ -13,6 +13,9 @@ on:
       - 'pyproject.toml'
   pull_request:
     branches: [ "main" ]
+  pull_request_target:
+    branches: [ "main" ]
+    types: [labeled, synchronize, opened, reopened]
   workflow_dispatch:
 
 jobs:
@@ -83,23 +86,24 @@ jobs:
   validate-on-dev:
     needs: test
     runs-on: ubuntu-latest
-    if: github.event_name == 'pull_request'
+    # Use pull_request_target to access secrets from forks
+    # Only runs when a maintainer adds the "validate-on-dev" label
+    if: |
+      github.event_name == 'pull_request_target' &&
+      contains(github.event.pull_request.labels.*.name, 'validate-on-dev')
     steps:
       - name: Trigger PR Validation on Dev Airflow
         id: trigger_dag
         run: |
-          echo "🚀 Triggering validation for PR #${{ github.event.number }}..."
+          echo "🚀 Triggering validation for PR #${{ github.event.pull_request.number }}..."
           RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "https://dev.airflow.colav.co/api/v2/dags/pr_validator/dagRuns" \
             -H "Content-Type: application/json" \
             -H "Authorization: Bearer ${{ secrets.AIRFLOW_API_TOKEN }}" \
             -d '{
-              "dag_run_id": "pr_${{ github.event.number }}_${{ github.run_number }}",
+              "dag_run_id": "pr_${{ github.event.pull_request.number }}_${{ github.run_number }}",
               "logical_date": "'$(date -u +%Y-%m-%dT%H:%M:%SZ)'",
               "conf": {
-                "pr_number": ${{ github.event.number }},
-                "github_token": "${{ secrets.GITHUB_TOKEN }}"
-              }
-            }')
+                "pr_number": ${{ github.event.pull_request.number }},
 
           HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
           BODY=$(echo "$RESPONSE" | head -n-1)
