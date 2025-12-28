@@ -10,11 +10,37 @@ on:
       - 'dags/**'
       - 'impactu/**'
       - 'requirements.txt'
+      - 'pyproject.toml'
   pull_request:
     branches: [ "main" ]
   workflow_dispatch:
 
 jobs:
+  code-quality:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          pip install ruff mypy
+
+      - name: Run Ruff linter
+        run: ruff check .
+
+      - name: Run Ruff formatter check
+        run: ruff format --check .
+
+      - name: Run mypy
+        run: mypy .
+
   test:
     runs-on: ubuntu-latest
     steps:
@@ -74,15 +100,15 @@ jobs:
                 "github_token": "${{ secrets.GITHUB_TOKEN }}"
               }
             }')
-          
+
           HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
           BODY=$(echo "$RESPONSE" | head -n-1)
-          
+
           if [ "$HTTP_CODE" != "200" ]; then
             echo "❌ Failed to trigger DAG (HTTP $HTTP_CODE): $BODY"
             exit 1
           fi
-          
+
           DAG_RUN_ID=$(echo "$BODY" | jq -r '.dag_run_id')
           echo "dag_run_id=$DAG_RUN_ID" >> $GITHUB_OUTPUT
           echo "✅ Triggered: $DAG_RUN_ID"
@@ -91,19 +117,19 @@ jobs:
         run: |
           DAG_RUN_ID="${{ steps.trigger_dag.outputs.dag_run_id }}"
           echo "⏱️ Polling validation status for $DAG_RUN_ID..."
-          
+
           MAX_ATTEMPTS=60  # 10 minutes max
           ATTEMPT=0
-          
+
           while [ $ATTEMPT -lt $MAX_ATTEMPTS ]; do
             RESPONSE=$(curl -s "https://dev.airflow.colav.co/api/v2/dags/pr_validator/dagRuns/$DAG_RUN_ID" \
               -H "Authorization: Bearer ${{ secrets.AIRFLOW_API_TOKEN }}")
-            
+
             STATE=$(echo "$RESPONSE" | jq -r '.state')
             DURATION=$(echo "$RESPONSE" | jq -r '.duration // "running"')
-            
+
             echo "  Status: $STATE | Duration: ${DURATION}s"
-            
+
             if [ "$STATE" == "success" ]; then
               echo "✅ Validation Passed!"
               break
@@ -120,11 +146,11 @@ jobs:
               echo "⚠️ Error fetching status"
               exit 1
             fi
-            
+
             ATTEMPT=$((ATTEMPT + 1))
             sleep 10
           done
-          
+
           if [ $ATTEMPT -ge $MAX_ATTEMPTS ]; then
             echo "⏱️ Timeout waiting for validation"
             exit 1
