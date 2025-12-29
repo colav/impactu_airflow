@@ -1,0 +1,90 @@
+name: Validate PR on Dev
+
+on:
+  pull_request_target:
+    branches: [ "main" ]
+    types: [labeled]
+
+jobs:
+  validate-on-dev:
+    runs-on: ubuntu-latest
+    # Only runs when a maintainer adds the "validate-on-dev" label
+    if: contains(github.event.pull_request.labels.*.name, 'validate-on-dev')
+    steps:
+      - name: Trigger PR Validation on Dev Airflow
+        id: trigger_dag
+        run: |
+          echo "🚀 Triggering validation for PR #${{ github.event.pull_request.number }}..."
+          RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "https://dev.airflow.colav.co/api/v2/dags/pr_validator/dagRuns" \
+            -H "Content-Type: application/json" \
+            -H "Authorization: Bearer ${{ secrets.AIRFLOW_API_TOKEN }}" \
+            -d '{
+              "dag_run_id": "pr_${{ github.event.pull_request.number }}_${{ github.run_number }}",
+              "logical_date": "'$(date -u +%Y-%m-%dT%H:%M:%SZ)'",
+              "conf": {
+                "pr_number": ${{ github.event.pull_request.number }},
+                "repository": "${{ github.repository }}"
+              }
+            }')
+
+          HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
+          BODY=$(echo "$RESPONSE" | head -n-1)
+
+          if [ "$HTTP_CODE" != "200" ]; then
+            echo "❌ Failed to trigger DAG (HTTP $HTTP_CODE): $BODY"
+            exit 1
+          fi
+
+          DAG_RUN_ID=$(echo "$BODY" | jq -r '.dag_run_id')
+          echo "dag_run_id=$DAG_RUN_ID" >> $GITHUB_OUTPUT
+          echo "✅ Triggered: $DAG_RUN_ID"
+
+      - name: Wait for Validation Results
+        run: |
+          DAG_RUN_ID="${{ steps.trigger_dag.outputs.dag_run_id }}"
+          echo "⏱️ Polling validation status for $DAG_RUN_ID..."
+
+          MAX_ATTEMPTS=60  # 10 minutes max
+          ATTEMPT=0
+
+          while [ $ATTEMPT -lt $MAX_ATTEMPTS ]; do
+            RESPONSE=$(curl -s "https://dev.airflow.colav.co/api/v2/dags/pr_validator/dagRuns/$DAG_RUN_ID" \
+              -H "Authorization: Bearer ${{ secrets.AIRFLOW_API_TOKEN }}")
+
+            STATE=$(echo "$RESPONSE" | jq -r '.state')
+            DURATION=$(echo "$RESPONSE" | jq -r '.duration // "running"')
+
+            echo "  Status: $STATE | Duration: ${DURATION}s"
+
+            if [ "$STATE" == "success" ]; then
+              echo "✅ Validation Passed!"
+              break
+            elif [ "$STATE" == "failed" ]; then
+              echo "❌ Validation Failed!"
+              echo ""
+              echo "📋 Fetching validation logs..."
+              curl -s "https://dev.airflow.colav.co/api/v2/dags/pr_validator/dagRuns/$DAG_RUN_ID/taskInstances/validate_pr/logs/1" \
+                -H "Authorization: Bearer ${{ secrets.AIRFLOW_API_TOKEN }}" \
+                | jq -r '.content[] | select(.event) | .event' \
+                | grep -E "ERROR|FAILED|✗|❌" || echo "$LOGS"
+              exit 1
+            elif [ "$STATE" == "null" ] || [ "$STATE" == "" ]; then
+              echo "⚠️ Error fetching status"
+              exit 1
+            fi
+
+            ATTEMPT=$((ATTEMPT + 1))
+            sleep 10
+          done
+
+          if [ $ATTEMPT -ge $MAX_ATTEMPTS ]; then
+            echo "⏱️ Timeout waiting for validation"
+            exit 1
+          fi
+
+      - name: Post Validation Summary
+        if: always()
+        run: |
+          DAG_RUN_ID="${{ steps.trigger_dag.outputs.dag_run_id }}"
+          echo "📊 Full validation logs available at:"
+          echo "https://dev.airflow.colav.co/dags/pr_validator/grid?dag_run_id=$DAG_RUN_ID"

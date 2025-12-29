@@ -5,20 +5,37 @@
 [![Validate and Test DAGs](https://github.com/omazapa/impactu_airflow/actions/workflows/deploy.yml/badge.svg)](https://github.com/omazapa/impactu_airflow/actions/workflows/deploy.yml)
 # ImpactU Airflow ETL
 
-Central repository for Apache Airflow DAGs for the Extraction, Transformation, and Loading (ETL) processes of the ImpactU project.
+Central repository for Apache Airflow DAGs and ETL (Extraction, Transformation, and Loading) processes for the ImpactU project. This package includes the full logic for data orchestration, source extraction, and data processing.
 
 ## 🚀 Description
 This project orchestrates data collection from various scientific and academic sources, its processing using the [Kahi](https://github.com/colav/Kahi) tool, and its subsequent loading into query systems such as MongoDB and Elasticsearch.
 
-## 📂 Project Structure
-The repository is organized by data lifecycle stages:
+## � Installation
+You can install the package directly from PyPI:
 
+```bash
+pip install impactu_airflow
+```
+
+Or for development:
+
+```bash
+git clone https://github.com/colav/impactu_airflow.git
+cd impactu_airflow
+pip install -e .
+```
+
+## �📂 Project Structure
+The repository is organized by data lifecycle stages and Airflow components:
+
+*   `dags/`: Apache Airflow DAG definitions.
 *   `extract/`: Extraction logic for sources like OpenAlex, ORCID, ROR, etc.
 *   `transform/`: Transformation and normalization processes (Kahi).
-*   `load/`: Loading scripts to final destinations.
-*   `deploys/`: Lógica de despliegue de servicios externos (APIs, bases de datos) mediante DAGs.
-*   `backups/`: Automatización de respaldos de bases de datos mediante DAGs.
-*   `tests/`: Integration and data quality tests.
+*   `load/`: Loading scripts to final destinations (MongoDB, Elasticsearch).
+*   `impactu/`: Core utilities and shared logic for the project.
+*   `deploys/`: Deployment logic for external services (APIs, databases) via DAGs.
+*   `backups/`: Database backup automation via DAGs.
+*   `tests/`: Integration, unit, and data quality tests.
 
 ## 📋 Requirements and Architecture
 For details on design principles (Checkpoints, Idempotency, Parallelism), see the [System Requirements](REQUIREMENTS.md) document.
@@ -35,18 +52,18 @@ To maintain consistency in the Airflow interface, we follow this convention:
 | **Backup** | `backup_{db}_{name}` | `backup_mongodb_kahi` |
 | **Tests** | `tests_{service}` | `tests_kahi` |
 
-## ⚙️ Desarrollo y Despliegue
+## ⚙️ Development and Deployment
 
-Este repositorio se enfoca exclusivamente en la lógica de los DAGs y procesos ETL. La infraestructura base es provista por el repositorio **Chia**.
+This repository focuses exclusively on DAG logic and ETL processes. The base infrastructure is provided by the **Chia** repository.
 
-Para detalles sobre la estrategia de CI/CD, construcción de imágenes y gestión de entornos, consulta el documento:
+For details on the CI/CD strategy, image building, and environment management, see the document:
 👉 **[README_DEVOPS.md](README_DEVOPS.md)**
 
-### Flujo de Trabajo Local
-1. Clonar el repositorio.
-2. Instalar dependencias: `pip install -r requirements.txt`.
-3. Desarrollar DAGs en la carpeta `dags/`.
-4. Validar integridad: `pytest tests/etl/test_dag_integrity.py`.
+### Local Workflow
+1. Clone the repository.
+2. Install dependencies: `pip install -r requirements.txt`.
+3. Develop DAGs in the `dags/` folder.
+4. Validate integrity: `pytest tests/etl/test_dag_integrity.py`.
 
 ---
 **Colav - ImpactU**

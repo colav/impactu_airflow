@@ -1,0 +1,17 @@
+# Ignore non-DAG directories to speed up parsing and avoid errors
+backups/.*
+cache/.*
+config/.*
+deploys/.*
+docs/.*
+extract/.*
+impactu/.*
+load/.*
+logs/.*
+plugins/.*
+tests/.*
+transform/.*
+\.git/.*
+\.github/.*
+\.venv/.*
+__pycache__/.*
