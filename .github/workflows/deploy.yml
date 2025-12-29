@@ -83,6 +83,34 @@ jobs:
           export PYTHONPATH=$PYTHONPATH:.
           pytest tests/etl/test_scimagojr.py
 
+  publish-to-pypi:
+    needs: test
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install build dependencies
+        run: |
+          pip install build twine
+
+      - name: Build package
+        run: |
+          python -m build
+
+      - name: Publish to PyPI
+        env:
+          TWINE_USERNAME: __token__
+          TWINE_PASSWORD: ${{ secrets.PYPI_PASSWORD }}
+        run: |
+          python -m twine upload dist/*
+
   validate-on-dev:
     needs: test
     runs-on: ubuntu-latest
