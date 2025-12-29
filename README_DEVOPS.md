@@ -2,14 +2,12 @@
 
 This document details the professional CI/CD strategy, environment management, and deployment for the `impactu_airflow` monorepo.
 
-## 1. Hybrid Architecture: Docker + DAG Bundles (Airflow 3.x)
+## 1. DAG Bundles Architecture (Airflow 3.x)
 
-For the production environment, we use a hybrid approach:
-- **Docker Image**: We build a custom image `colav/impactu_airflow:dags-prod` that contains all the project dependencies and the core logic (`extract/`, `transform/`, etc.). This ensures that the environment is consistent and all modules are available in the `PYTHONPATH`.
-- **DAG Bundles**: This native Airflow 3 feature allows the Scheduler and Webserver to consume DAGs directly from Git. This allows updating DAG logic without restarting containers, while the base image provides the heavy dependencies.
-
-- **Infrastructure**: The production environment pulls the `colav/impactu_airflow:dags-prod` image.
-- **Logic**: Changes in the `main` branch are automatically reflected via DAG Bundles and a new image is built and pushed to Docker Hub.
+For the production environment, we use DAG Bundles:
+- **DAG Bundles**: This native Airflow 3 feature allows the Scheduler and Webserver to consume DAGs directly from Git. This allows updating DAG logic automatically without restarting services.
+- **Dependencies**: All project dependencies are installed directly in the Airflow environment.
+- **Logic**: Changes in the `main` branch are automatically reflected via DAG Bundles, and the DAG Processor synchronizes files in real-time.
 
 ## 2. Production Strategy
 
@@ -22,7 +20,7 @@ For the production environment, we use a hybrid approach:
 2. Changes are developed in fork branches and validated locally.
 3. A **Pull Request (PR)** is opened from the fork to the `main` branch of the official repository.
 4. CI runs automatic tests and, if necessary, a remote validation in the development environment.
-5. Once approved and merged into `main`, the Airflow **DAG Processor** in production detects the update and synchronizes files in real-time.
+5. Once approved and merged into `main`, the Airflow DAG Processor in production detects the update and synchronizes files in real-time.
 
 ## 3. Production Server Configuration
 
@@ -61,14 +59,12 @@ The `.github/workflows/deploy.yml` file manages the lifecycle:
 - **Remote Validation (PRs)**: When a PR is opened, CI notifies the Development Airflow API to run the `pr_validator` DAG. This DAG downloads the PR changes and validates them in the real Dev environment without needing to deploy the full image.
 
 ### Deployment Phase
-- **Docker Build**: Upon merging into `main`, a GitHub Action builds the `colav/impactu_airflow:dags-prod` image and pushes it to Docker Hub.
-- **Production Sync**: The production server automatically synchronizes the DAG code via the `impactu_prod` bundle.
+- **Production Sync**: Upon merging into `main`, the production server automatically synchronizes the DAG code via the `impactu_prod` bundle.
 
 ## 5. Secrets and Configuration Management
 
 ### GitHub Secrets
-- `DOCKER_USERNAME` / `DOCKER_PASSWORD`: Credentials to push the image to Docker Hub.
-- `AIRFLOW_API_USER` / `AIRFLOW_API_PASSWORD`: Credentials for CI to trigger validations on the Development server.
+- `AIRFLOW_API_TOKEN`: Bearer token for CI to trigger validations on the Development server.
 - `GH_TOKEN_PR_VALIDATOR`: GitHub Token (Personal Access Token) with read permissions for the validator DAG to download PR files.
 
 ### Airflow (Runtime)
