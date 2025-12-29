@@ -5,20 +5,37 @@
 [![Validate and Test DAGs](https://github.com/omazapa/impactu_airflow/actions/workflows/deploy.yml/badge.svg)](https://github.com/omazapa/impactu_airflow/actions/workflows/deploy.yml)
 # ImpactU Airflow ETL
 
-Central repository for Apache Airflow DAGs for the Extraction, Transformation, and Loading (ETL) processes of the ImpactU project.
+Central repository for Apache Airflow DAGs and ETL (Extraction, Transformation, and Loading) processes for the ImpactU project. This package includes the full logic for data orchestration, source extraction, and data processing.
 
 ## 🚀 Description
 This project orchestrates data collection from various scientific and academic sources, its processing using the [Kahi](https://github.com/colav/Kahi) tool, and its subsequent loading into query systems such as MongoDB and Elasticsearch.
 
-## 📂 Project Structure
-The repository is organized by data lifecycle stages:
+## � Installation
+You can install the package directly from PyPI:
 
+```bash
+pip install impactu_airflow
+```
+
+Or for development:
+
+```bash
+git clone https://github.com/colav/impactu_airflow.git
+cd impactu_airflow
+pip install -e .
+```
+
+## �📂 Project Structure
+The repository is organized by data lifecycle stages and Airflow components:
+
+*   `dags/`: Apache Airflow DAG definitions.
 *   `extract/`: Extraction logic for sources like OpenAlex, ORCID, ROR, etc.
 *   `transform/`: Transformation and normalization processes (Kahi).
-*   `load/`: Loading scripts to final destinations.
+*   `load/`: Loading scripts to final destinations (MongoDB, Elasticsearch).
+*   `impactu/`: Core utilities and shared logic for the project.
 *   `deploys/`: Deployment logic for external services (APIs, databases) via DAGs.
 *   `backups/`: Database backup automation via DAGs.
-*   `tests/`: Integration and data quality tests.
+*   `tests/`: Integration, unit, and data quality tests.
 
 ## 📋 Requirements and Architecture
 For details on design principles (Checkpoints, Idempotency, Parallelism), see the [System Requirements](REQUIREMENTS.md) document.
