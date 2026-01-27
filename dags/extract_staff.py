@@ -1,12 +1,11 @@
 from datetime import datetime, timedelta
 
-import pendulum
 from airflow import DAG
 from airflow.models import Variable
 from airflow.providers.mongo.hooks.mongo import MongoHook
 from airflow.providers.standard.operators.python import PythonOperator
 from airflow.sdk import Param
-from extract.staff_extractor import StaffExtractor
+from extract.staff.staff_extractor import StaffExtractor
 
 drive_root_folder_id = Variable.get("staff_drive_root_folder_id")
 
@@ -75,7 +74,6 @@ with DAG(
     default_args=default_args,
     description="Extract staff files from Google Drive and load into MongoDB",
     schedule="0 2 * * 1",
-    timezone=pendulum.timezone("America/Bogota"),
     catchup=False,
     tags=["extract", "staff"],
     params={

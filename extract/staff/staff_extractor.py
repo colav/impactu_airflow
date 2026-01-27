@@ -6,13 +6,13 @@ import os
 import pickle
 import re
 import time
-from datetime import datetime
-from typing import Any
+from datetime import datetime, timezone
+from typing import Any, cast
 
 import pandas as pd
-from google.auth.transport.requests import Request
-from googleapiclient.discovery import build
-from googleapiclient.http import MediaIoBaseDownload
+from google.auth.transport.requests import Request  # type: ignore[import-not-found]
+from googleapiclient.discovery import build  # type: ignore[import-not-found]
+from googleapiclient.http import MediaIoBaseDownload  # type: ignore[import-not-found]
 from pymongo import ReplaceOne
 
 from extract.base_extractor import BaseExtractor
@@ -217,7 +217,8 @@ class StaffExtractor(BaseExtractor):
         df = pd.read_excel(local_path, dtype=str)  # keep codes/IDs as strings
         # Mongo-friendly: NaN -> None
         df = df.where(pd.notnull(df), None)
-        return df.to_dict(orient="records")
+        records = cast(list[dict[str, Any]], df.to_dict(orient="records"))
+        return records
 
     def _already_loaded(
         self, institution_id: str, drive_file_id: str, drive_modified_time: str
@@ -260,7 +261,7 @@ class StaffExtractor(BaseExtractor):
             self.logger.info(f"Deleting previous staff docs for institution {institution_id}...")
             self.collection.delete_many({"institution_id": institution_id})
 
-        extracted_at = datetime.now(datetime.UTC).isoformat()
+        extracted_at = datetime.now(timezone.utc).isoformat()  # noqa: UP017
 
         ops: list[ReplaceOne] = []
         for i, row in enumerate(records):
