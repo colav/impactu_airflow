@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+import contextlib
 import io
 import os
 import pickle
 import re
 import time
-from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional, Tuple
+from datetime import datetime
+from typing import Any
 
 import pandas as pd
 from google.auth.transport.requests import Request
@@ -15,7 +16,6 @@ from googleapiclient.http import MediaIoBaseDownload
 from pymongo import ReplaceOne
 
 from extract.base_extractor import BaseExtractor
-
 
 FOLDER_MIME = "application/vnd.google-apps.folder"
 XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
@@ -78,7 +78,8 @@ class StaffExtractor(BaseExtractor):
         # _id is already unique; add a few practical indexes:
         self.collection.create_index("institution_id")
         self.collection.create_index("drive_file_id")
-        self.collection.create_index([("institution_id", 1), ("drive_file_id", 1)])
+        self.collection.create_index(
+            [("institution_id", 1), ("drive_file_id", 1)])
         self.collection.create_index("extracted_at")
 
     # Google Drive helpers
@@ -104,12 +105,12 @@ class StaffExtractor(BaseExtractor):
         q: str,
         fields: str = "nextPageToken, files(id, name, mimeType, modifiedTime, size)",
         page_size: int = 1000,
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """
         Generic Drive list() helper with pagination.
         """
         service = self._get_drive_service()
-        out: List[Dict[str, Any]] = []
+        out: list[dict[str, Any]] = []
         page_token = None
 
         while True:
@@ -134,9 +135,9 @@ class StaffExtractor(BaseExtractor):
 
         return out
 
-    def _list_institution_folders(self) -> List[Dict[str, Any]]:
+    def _list_institution_folders(self) -> list[dict[str, Any]]:
         """
-        List all first-level institution folders under the root folder.
+        list all first-level institution folders under the root folder.
         """
         q = (
             f"'{self.drive_root_folder_id}' in parents "
@@ -144,7 +145,7 @@ class StaffExtractor(BaseExtractor):
         )
         return self._list_files(q=q)
 
-    def _parse_institution_folder_name(self, folder_name: str) -> Tuple[Optional[str], str]:
+    def _parse_institution_folder_name(self, folder_name: str) -> tuple[str | None, str]:
         """
         Expected folder naming format: RORID_INSTITUTION_NAME
 
@@ -159,9 +160,9 @@ class StaffExtractor(BaseExtractor):
         ror_id, rest = folder_name.split("_", 1)
         return ror_id.strip(), rest.strip()
 
-    def _list_staff_excels(self, folder_id: str) -> List[Dict[str, Any]]:
+    def _list_staff_excels(self, folder_id: str) -> list[dict[str, Any]]:
         """
-        List Excel files (xlsx/xls) in a given institution folder.
+        list Excel files (xlsx/xls) in a given institution folder.
 
         If any file names start with "staff_", prefer those.
         """
@@ -173,18 +174,19 @@ class StaffExtractor(BaseExtractor):
         files = self._list_files(q=q)
 
         # (Optional) prioritize those named staff_...
-        staff_like = [f for f in files if (f.get("name") or "").lower().startswith("staff_")]
+        staff_like = [f for f in files if (
+            f.get("name") or "").lower().startswith("staff_")]
         return staff_like if staff_like else files
 
     @staticmethod
-    def _pick_latest_by_modified_time(files: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    def _pick_latest_by_modified_time(files: list[dict[str, Any]]) -> dict[str, Any] | None:
         """
         Pick the file with the latest modifiedTime (Drive metadata).
         """
         if not files:
             return None
 
-        def key(f: Dict[str, Any]) -> str:
+        def key(f: dict[str, Any]) -> str:
             # ISO 8601 timestamps are lexicographically comparable
             return f.get("modifiedTime") or ""
 
@@ -202,7 +204,8 @@ class StaffExtractor(BaseExtractor):
         request = service.files().get_media(fileId=file_id)
 
         with io.FileIO(local_path, "wb") as fh:
-            downloader = MediaIoBaseDownload(fh, request, chunksize=1024 * 1024)
+            downloader = MediaIoBaseDownload(
+                fh, request, chunksize=1024 * 1024)
             done = False
             while not done:
                 _, done = downloader.next_chunk()
@@ -210,7 +213,7 @@ class StaffExtractor(BaseExtractor):
         return local_path
 
     # Excel -> Mongo
-    def _read_excel_as_records(self, local_path: str) -> List[Dict[str, Any]]:
+    def _read_excel_as_records(self, local_path: str) -> list[dict[str, Any]]:
         """
         Read an Excel file into a list of row dicts (raw, no normalization).
         """
@@ -242,8 +245,8 @@ class StaffExtractor(BaseExtractor):
         institution_id: str,
         institution_name: str,
         folder_id: str,
-        file_meta: Dict[str, Any],
-        records: List[Dict[str, Any]],
+        file_meta: dict[str, Any],
+        records: list[dict[str, Any]],
         chunk_size: int = 2000,
     ) -> None:
         """
@@ -255,12 +258,13 @@ class StaffExtractor(BaseExtractor):
         drive_size = file_meta.get("size")
 
         if self.keep_only_latest_per_institution:
-            self.logger.info(f"Deleting previous staff docs for institution {institution_id}...")
+            self.logger.info(
+                f"Deleting previous staff docs for institution {institution_id}...")
             self.collection.delete_many({"institution_id": institution_id})
 
-        extracted_at = datetime.now(timezone.utc).isoformat()
+        extracted_at = datetime.now(datetime.UTC).isoformat()
 
-        ops: List[ReplaceOne] = []
+        ops: list[ReplaceOne] = []
         for i, row in enumerate(records):
             # Raw document containing the Excel columns as-is.
             doc = dict(row)
@@ -279,16 +283,18 @@ class StaffExtractor(BaseExtractor):
 
         total = len(ops)
         if total == 0:
-            self.logger.warning(f"No rows found in {drive_file_name} for {institution_id}.")
+            self.logger.warning(
+                f"No rows found in {drive_file_name} for {institution_id}.")
             return
 
-        self.logger.info(f"Writing {total} staff docs for {institution_id} (bulk upsert)...")
+        self.logger.info(
+            f"Writing {total} staff docs for {institution_id} (bulk upsert)...")
         for start in range(0, total, chunk_size):
             chunk = ops[start: start + chunk_size]
             self.collection.bulk_write(chunk, ordered=False)
 
     # Public API
-    def process_all_institutions(self, force: bool = False) -> Dict[str, Any]:
+    def process_all_institutions(self, force: bool = False) -> dict[str, Any]:
         """
         Process all institution subfolders (one per institution).
 
@@ -303,17 +309,21 @@ class StaffExtractor(BaseExtractor):
             Simple processing metrics.
         """
         folders = self._list_institution_folders()
-        self.logger.info(f"Found {len(folders)} institution folders under root.")
+        self.logger.info(
+            f"Found {len(folders)} institution folders under root.")
 
-        stats = {"folders": len(folders), "processed": 0, "skipped": 0, "empty": 0, "errors": 0}
+        stats = {"folders": len(folders), "processed": 0,
+                 "skipped": 0, "empty": 0, "errors": 0}
 
         for folder in folders:
             folder_id = folder["id"]
             folder_name = folder.get("name", "")
-            ror_id, inst_name = self._parse_institution_folder_name(folder_name)
+            ror_id, inst_name = self._parse_institution_folder_name(
+                folder_name)
 
             if not ror_id:
-                self.logger.warning(f"Skipping folder with unexpected name format: {folder_name}")
+                self.logger.warning(
+                    f"Skipping folder with unexpected name format: {folder_name}")
                 stats["skipped"] += 1
                 continue
 
@@ -321,7 +331,8 @@ class StaffExtractor(BaseExtractor):
                 excel_files = self._list_staff_excels(folder_id)
                 latest = self._pick_latest_by_modified_time(excel_files)
                 if not latest:
-                    self.logger.warning(f"No excel files found in {folder_name}")
+                    self.logger.warning(
+                        f"No excel files found in {folder_name}")
                     stats["empty"] += 1
                     continue
 
@@ -329,13 +340,16 @@ class StaffExtractor(BaseExtractor):
                 drive_modified_time = latest.get("modifiedTime", "")
 
                 if not force and self._already_loaded(ror_id, drive_file_id, drive_modified_time):
-                    self.logger.info(f"[SKIP] {ror_id} latest file already loaded: {latest.get('name')}")
+                    self.logger.info(
+                        f"[SKIP] {ror_id} latest file already loaded: {latest.get('name')}")
                     stats["skipped"] += 1
                     continue
 
-                self.logger.info(f"[{ror_id}] Latest staff file: {latest.get('name')} ({drive_modified_time})")
+                self.logger.info(
+                    f"[{ror_id}] Latest staff file: {latest.get('name')} ({drive_modified_time})")
 
-                local_path = self._download_file_to_cache(drive_file_id, latest.get("name", "staff.xlsx"))
+                local_path = self._download_file_to_cache(
+                    drive_file_id, latest.get("name", "staff.xlsx"))
                 records = self._read_excel_as_records(local_path)
 
                 self._replace_institution_data(
@@ -348,19 +362,19 @@ class StaffExtractor(BaseExtractor):
 
                 stats["processed"] += 1
                 # Optional checkpoint
-                try:
+                with contextlib.suppress(Exception):
                     self.save_checkpoint(
                         f"staff_{ror_id}",
-                        {"drive_file_id": drive_file_id, "drive_modified_time": drive_modified_time}
+                        {"drive_file_id": drive_file_id,
+                            "drive_modified_time": drive_modified_time}
                     )
-                except Exception:
-                    pass
 
                 # Small courtesy delay
                 time.sleep(0.1)
 
             except Exception as e:
-                self.logger.error(f"Error processing folder {folder_name}: {e}")
+                self.logger.error(
+                    f"Error processing folder {folder_name}: {e}")
                 stats["errors"] += 1
 
         return stats

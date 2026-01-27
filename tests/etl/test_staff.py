@@ -52,7 +52,8 @@ def test_parse_institution_folder_name(extractor):
     assert ror_id == "03bp5hc83"
     assert inst_name == "Universidad_de_Antioquia"
 
-    ror_id2, inst_name2 = extractor._parse_institution_folder_name("BadFormatName")
+    ror_id2, inst_name2 = extractor._parse_institution_folder_name(
+        "BadFormatName")
     assert ror_id2 is None
     assert inst_name2 == "BadFormatName"
 
@@ -75,7 +76,8 @@ def test_replace_institution_data_deletes_and_inserts(extractor):
             {"_id": "03bp5hc83:oldfile:1", "institution_id": "03bp5hc83", "x": 2},
         ]
     )
-    assert extractor.collection.count_documents({"institution_id": "03bp5hc83"}) == 2
+    assert extractor.collection.count_documents(
+        {"institution_id": "03bp5hc83"}) == 2
 
     file_meta = {
         "id": "newfileid",
@@ -99,7 +101,8 @@ def test_replace_institution_data_deletes_and_inserts(extractor):
     )
 
     # Should now have only the new 3 docs for this institution (old ones deleted)
-    assert extractor.collection.count_documents({"institution_id": "03bp5hc83"}) == 3
+    assert extractor.collection.count_documents(
+        {"institution_id": "03bp5hc83"}) == 3
 
     doc0 = extractor.collection.find_one({"_id": "03bp5hc83:newfileid:0"})
     assert doc0 is not None
@@ -188,5 +191,7 @@ def test_process_all_institutions_smoke(extractor):
     assert stats["errors"] == 0
 
     # Only folder2 should have been written
-    assert extractor.collection.count_documents({"institution_id": "02abcde12"}) == 2
-    assert extractor.collection.count_documents({"institution_id": "03bp5hc83"}) == 0
+    assert extractor.collection.count_documents(
+        {"institution_id": "02abcde12"}) == 2
+    assert extractor.collection.count_documents(
+        {"institution_id": "03bp5hc83"}) == 0

@@ -1,12 +1,11 @@
 from datetime import datetime, timedelta
 
+import pendulum
 from airflow import DAG
 from airflow.models import Variable
 from airflow.providers.mongo.hooks.mongo import MongoHook
 from airflow.providers.standard.operators.python import PythonOperator
 from airflow.sdk import Param
-import pendulum
-
 from extract.staff_extractor import StaffExtractor
 
 drive_root_folder_id = Variable.get("staff_drive_root_folder_id")
@@ -33,12 +32,14 @@ def run_staff_extraction(**kwargs: dict) -> None:
     """
     params = kwargs.get("params", {})
 
-    drive_root_folder_id = params.get("drive_root_folder_id") or Variable.get("staff_drive_root_folder_id")
+    drive_root_folder_id = params.get(
+        "drive_root_folder_id") or Variable.get("staff_drive_root_folder_id")
     google_token_pickle = params.get("google_token_pickle")
     cache_dir = params.get("cache_dir", "/opt/airflow/cache/staff")
 
     force = params.get("force", False)
-    keep_only_latest_per_institution = params.get("keep_only_latest_per_institution", True)
+    keep_only_latest_per_institution = params.get(
+        "keep_only_latest_per_institution", True)
 
     if not drive_root_folder_id:
         raise ValueError("Missing required param: drive_root_folder_id")

@@ -29,7 +29,7 @@ To enable automatic synchronization and ensure that internal dependencies (such 
 **Note:** We use `"subdir": "."` so that the repository root is added to the `PYTHONPATH`, allowing DAGs to import modules from other folders. An `.airflowignore` file is included to prevent Airflow from attempting to process folders that do not contain DAGs.
 
 ```bash
-AIRFLOW__DAG_PROCESSOR__DAG_BUNDLE_CONFIG_LIST='[
+AIRFLOW__DAG_PROCESSOR__DAG_BUNDLE_CONFIG_list='[
     {
         "name": "impactu_prod",
         "classpath": "airflow.providers.git.bundles.git.GitDagBundle",
