@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Any, cast
 from unittest.mock import patch
 
 import mongomock
@@ -9,23 +10,24 @@ from dags.ciarp_capture import CiarpExtractor
 
 # Workaround for mongomock bug with pymongo 4.x bulk_write (seen in some bulk ops)
 # https://github.com/mongomock/mongomock/issues/812
-if hasattr(BulkOperationBuilder, "add_update"):
-    original_add_update = BulkOperationBuilder.add_update
+_builder_cls = cast(Any, BulkOperationBuilder)
+if hasattr(_builder_cls, "add_update"):
+    original_add_update = _builder_cls.add_update
 
     def patched_add_update(self, filter, doc, upsert=False, multi=False, **kwargs):
         kwargs.pop("sort", None)
         return original_add_update(self, filter, doc, upsert, multi, **kwargs)
 
-    BulkOperationBuilder.add_update = patched_add_update
+    _builder_cls.add_update = patched_add_update
 
-if hasattr(BulkOperationBuilder, "add_replace"):
-    original_add_replace = BulkOperationBuilder.add_replace
+if hasattr(_builder_cls, "add_replace"):
+    original_add_replace = _builder_cls.add_replace
 
     def patched_add_replace(self, selector, doc, upsert=False, **kwargs):
         kwargs.pop("sort", None)
         return original_add_replace(self, selector, doc, upsert=upsert, **kwargs)
 
-    BulkOperationBuilder.add_replace = patched_add_replace
+    _builder_cls.add_replace = patched_add_replace
 
 
 @pytest.fixture

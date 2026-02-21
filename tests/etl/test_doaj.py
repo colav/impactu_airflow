@@ -1,3 +1,4 @@
+from typing import Any, cast
 from unittest.mock import patch
 
 import mongomock
@@ -7,14 +8,15 @@ from mongomock.collection import BulkOperationBuilder
 from dags.doaj_capture import DoajExtractor
 
 # Workaround for mongomock bug with pymongo 4.x bulk_write
-if hasattr(BulkOperationBuilder, "add_update"):
-    original_add_update = BulkOperationBuilder.add_update
+_builder_cls = cast(Any, BulkOperationBuilder)
+if hasattr(_builder_cls, "add_update"):
+    original_add_update = _builder_cls.add_update
 
     def patched_add_update(self, filter, doc, upsert=False, multi=False, **kwargs):
         kwargs.pop("sort", None)
         return original_add_update(self, filter, doc, upsert, multi, **kwargs)
 
-    BulkOperationBuilder.add_update = patched_add_update
+    _builder_cls.add_update = patched_add_update
 
 
 @pytest.fixture
