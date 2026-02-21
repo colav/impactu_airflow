@@ -241,10 +241,7 @@ class CiarpExtractor(BaseExtractor):
         """
         Resolve a subfolder name to its Drive folder ID under the given parent.
         """
-        q = (
-            f"'{parent_folder_id}' in parents "
-            f"and mimeType='{FOLDER_MIME}' and trashed=false"
-        )
+        q = f"'{parent_folder_id}' in parents and mimeType='{FOLDER_MIME}' and trashed=false"
         folders = self._list_files(q=q)
         target = subfolder_name.strip().lower()
         for folder in folders:
@@ -252,9 +249,7 @@ class CiarpExtractor(BaseExtractor):
             if name == target:
                 return folder["id"]
 
-        raise ValueError(
-            f"Subfolder '{subfolder_name}' not found under drive_root_folder_id."
-        )
+        raise ValueError(f"Subfolder '{subfolder_name}' not found under drive_root_folder_id.")
 
     @staticmethod
     def _parse_ciarp_filename(
@@ -395,7 +390,7 @@ class CiarpExtractor(BaseExtractor):
 
         self.logger.info(f"Writing {total} ciarp docs for {institution_id} (bulk upsert)...")
         for start in range(0, total, chunk_size):
-            chunk = ops[start: start + chunk_size]
+            chunk = ops[start : start + chunk_size]
             self.collection.bulk_write(chunk, ordered=False)
 
     # Public API
@@ -494,6 +489,7 @@ class CiarpExtractor(BaseExtractor):
         """
         self.process_all_files(force=force)
 
+
 default_args = {
     "owner": "impactu",
     "depends_on_past": False,
@@ -546,7 +542,9 @@ def run_ciarp_capture(**kwargs: dict) -> None:
     cache_dir = params.get("cache_dir", "/tmp/impactu_airflow_cache/ciarp")
 
     force = _coerce_bool(params.get("force", False))
-    keep_only_latest_per_institution = _coerce_bool(params.get("keep_only_latest_per_institution", True))
+    keep_only_latest_per_institution = _coerce_bool(
+        params.get("keep_only_latest_per_institution", True)
+    )
     backup_existing = _coerce_bool(params.get("backup_existing", True))
 
     if not drive_root_folder_id:

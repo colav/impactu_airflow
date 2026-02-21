@@ -218,9 +218,7 @@ class DoajExtractor(BaseExtractor):
         """
         Extract a .tar.gz file to a dedicated directory.
         """
-        extract_dir = os.path.join(
-            self.cache_dir, Path(tar_path).stem.replace(".tar", "")
-        )
+        extract_dir = os.path.join(self.cache_dir, Path(tar_path).stem.replace(".tar", ""))
         Path(extract_dir).mkdir(parents=True, exist_ok=True)
 
         try:
@@ -376,6 +374,7 @@ class DoajExtractor(BaseExtractor):
 
         Handles NDJSON, JSON arrays, and dicts with 'results'/'items' lists.
         """
+
         def _yield_from_loaded(data: Any) -> Generator[dict[str, Any], None, None]:
             if isinstance(data, list):
                 for item in data:
@@ -491,6 +490,7 @@ class DoajExtractor(BaseExtractor):
             except OSError:
                 self.logger.warning("Failed to clean up %s", path)
 
+
 def _compute_period(date_value: datetime) -> tuple[int, int]:
     month = date_value.month
     semester = 1 if month <= 6 else 2
@@ -500,15 +500,11 @@ def _compute_period(date_value: datetime) -> tuple[int, int]:
 def run_doaj_capture(**kwargs: dict) -> None:
     params = kwargs.get("params", {})
 
-    api_key = params.get("api_key") or Variable.get(
-        "doaj_api_key", default_var="")
+    api_key = params.get("api_key") or Variable.get("doaj_api_key", default_var="")
     if not api_key:
-        api_key = Variable.get("DOAJ_API_KEY", default_var="") or os.environ.get(
-            "DOAJ_API_KEY", ""
-        )
+        api_key = Variable.get("DOAJ_API_KEY", default_var="") or os.environ.get("DOAJ_API_KEY", "")
     if not api_key:
-        raise ValueError(
-            "Missing DOAJ API key (Airflow Variable doaj_api_key or DOAJ_API_KEY)")
+        raise ValueError("Missing DOAJ API key (Airflow Variable doaj_api_key or DOAJ_API_KEY)")
 
     download_journals = params.get("download_journals", True)
     download_articles = params.get("download_articles", False)
@@ -528,8 +524,10 @@ def run_doaj_capture(**kwargs: dict) -> None:
         semester = int(period_semester)
     else:
         logical_date = (
-            kwargs.get("data_interval_start") or kwargs.get(
-                "logical_date") or kwargs.get("execution_date") or datetime.now(UTC)
+            kwargs.get("data_interval_start")
+            or kwargs.get("logical_date")
+            or kwargs.get("execution_date")
+            or datetime.now(UTC)
         )
         year, semester = _compute_period(logical_date)
 

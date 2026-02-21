@@ -58,7 +58,7 @@ def test_derive_fields_journal_with_doaj_id():
 
 
 def test_iter_records_ndjson(tmp_path):
-    content = "{\"id\": \"1\"}\n{\"id\": \"2\"}\n"
+    content = '{"id": "1"}\n{"id": "2"}\n'
     file_path = tmp_path / "article_batch_1.json"
     file_path.write_text(content, encoding="utf-8")
 
@@ -69,8 +69,8 @@ def test_iter_records_ndjson(tmp_path):
 
 
 def test_process_file_upserts(extractor, tmp_path):
-    content = "{\"id\": \"1\", \"bibjson\": {\"identifier\": [{\"type\": \"doi\", \"id\": \"10.1/a\"}]}}\n"
-    content += "{\"id\": \"2\", \"bibjson\": {\"identifier\": [{\"type\": \"doi\", \"id\": \"10.1/b\"}]}}\n"
+    content = '{"id": "1", "bibjson": {"identifier": [{"type": "doi", "id": "10.1/a"}]}}\n'
+    content += '{"id": "2", "bibjson": {"identifier": [{"type": "doi", "id": "10.1/b"}]}}\n'
     file_path = tmp_path / "article_batch_1.json"
     file_path.write_text(content, encoding="utf-8")
 

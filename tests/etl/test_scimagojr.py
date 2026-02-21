@@ -61,8 +61,7 @@ def test_fetch_year(mock_get, extractor):
 
 def test_process_year_differential(extractor):
     # 1. Setup initial data in mock DB
-    initial_record = {"Sourceid": 12345,
-                      "year": 2023, "Title": "Old Title", "Rank": 2}
+    initial_record = {"Sourceid": 12345, "year": 2023, "Title": "Old Title", "Rank": 2}
     extractor.collection.insert_one(initial_record)
 
     # 2. Mock fetch_year to return updated data
