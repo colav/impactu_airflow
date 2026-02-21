@@ -3,7 +3,7 @@ from unittest.mock import patch
 import mongomock
 import pytest
 
-from extract.staff.staff_extractor import StaffExtractor
+from dags.staff_capture import StaffExtractor
 
 # Workaround for mongomock bug with pymongo 4.x bulk_write (seen in some bulk ops)
 # https://github.com/mongomock/mongomock/issues/812
@@ -15,6 +15,15 @@ if hasattr(mongomock.collection.BulkOperationBuilder, "add_update"):
         return original_add_update(self, filter, doc, upsert, multi, **kwargs)
 
     mongomock.collection.BulkOperationBuilder.add_update = patched_add_update
+
+if hasattr(mongomock.collection.BulkOperationBuilder, "add_replace"):
+    original_add_replace = mongomock.collection.BulkOperationBuilder.add_replace
+
+    def patched_add_replace(self, selector, doc, upsert=False, **kwargs):
+        kwargs.pop("sort", None)
+        return original_add_replace(self, selector, doc, upsert=upsert, **kwargs)
+
+    mongomock.collection.BulkOperationBuilder.add_replace = patched_add_replace
 
 
 @pytest.fixture

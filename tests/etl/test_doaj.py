@@ -3,7 +3,7 @@ from unittest.mock import patch
 import mongomock
 import pytest
 
-from extract.doaj.doaj_extractor import DoajExtractor
+from dags.doaj_capture import DoajExtractor
 
 # Workaround for mongomock bug with pymongo 4.x bulk_write
 if hasattr(mongomock.collection.BulkOperationBuilder, "add_update"):

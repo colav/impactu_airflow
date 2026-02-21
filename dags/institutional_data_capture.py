@@ -16,13 +16,13 @@ default_args = {
 
 
 with DAG(
-    "institutional_data_extractor",
+    "institutional_data_capture",
     default_args=default_args,
-    description="Trigger institutional extractors for STAFF and CIARP",
+    description="Trigger institutional capture DAGs for STAFF and CIARP",
     render_template_as_native_obj=True,
     schedule=None,
     catchup=False,
-    tags=["extract", "institutional"],
+    tags=["capture", "institutional"],
     params={
         "google_token_pickle": Param(
             "",
@@ -76,9 +76,9 @@ with DAG(
         ),
     },
 ) as dag:
-    trigger_staff_extractor = TriggerDagRunOperator(
-        task_id="trigger_extract_staff",
-        trigger_dag_id="extract_staff",
+    trigger_staff_capture = TriggerDagRunOperator(
+        task_id="trigger_staff_capture",
+        trigger_dag_id="staff_capture",
         wait_for_completion=True,
         poke_interval=60,
         conf={
@@ -92,9 +92,9 @@ with DAG(
         },
     )
 
-    trigger_ciarp_extractor = TriggerDagRunOperator(
-        task_id="trigger_extract_ciarp",
-        trigger_dag_id="extract_ciarp",
+    trigger_ciarp_capture = TriggerDagRunOperator(
+        task_id="trigger_ciarp_capture",
+        trigger_dag_id="ciarp_capture",
         wait_for_completion=True,
         poke_interval=60,
         conf={
@@ -109,4 +109,4 @@ with DAG(
         },
     )
 
-    trigger_staff_extractor >> trigger_ciarp_extractor
+    trigger_staff_capture >> trigger_ciarp_capture
