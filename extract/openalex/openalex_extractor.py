@@ -5,15 +5,134 @@ from __future__ import annotations
 import gzip
 import json
 import logging
-import threading
+import multiprocessing
+import multiprocessing.pool
 import time
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any
 
+import pymongo
 from pymongo import UpdateOne
 
 from extract.base_extractor import BaseExtractor
+
+# ---------------------------------------------------------------------------
+# Non-daemon pool — bypass Airflow's daemon worker restriction
+# ---------------------------------------------------------------------------
+# Python's ``Process.start()`` checks ``_current_process._config['daemon']``
+# (the *parent* process flag), not the child's property.  Overriding the
+# child's daemon property has no effect.
+#
+# Fix: patch _current_process._config to remove 'daemon' for the duration
+# of each worker start() call, then restore it.  All Pool bookkeeping
+# (join, terminate) still works correctly because workers are real processes.
+# ---------------------------------------------------------------------------
+
+
+class _NonDaemonProcess(multiprocessing.Process):
+    """Process that temporarily unsets the parent's daemon flag on start().
+
+    This allows Pool to spawn workers even when the parent (Airflow task
+    runner) is itself a daemon process.
+    """
+
+    def start(self) -> None:
+        import multiprocessing.process as _mpp
+        cfg = _mpp._current_process._config
+        was = cfg.pop("daemon", None)
+        try:
+            super().start()
+        finally:
+            if was is not None:
+                cfg["daemon"] = was
+
+
+class _NoDaemonPool(multiprocessing.pool.Pool):
+    """Pool that creates non-daemon workers from inside an Airflow daemon task."""
+
+    @staticmethod
+    def Process(ctx: Any, *args: Any, **kwds: Any) -> _NonDaemonProcess:  # type: ignore[override]
+        kwds.pop("daemon", None)
+        return _NonDaemonProcess(*args, **kwds)
+
+
+# ---------------------------------------------------------------------------
+# Per-process worker state — set once by _worker_init in each worker process
+# ---------------------------------------------------------------------------
+_worker_state: dict[str, Any] = {}
+
+
+def _worker_init(mongodb_uri: str, db_name: str, chunk_size: int) -> None:
+    """Open one MongoClient per worker process (called by Pool initializer)."""
+    _worker_state["client"] = pymongo.MongoClient(mongodb_uri)
+    _worker_state["db"] = _worker_state["client"][db_name]
+    _worker_state["chunk_size"] = chunk_size
+
+
+def _process_file(args: tuple[str, str]) -> dict[str, Any]:
+    """Process one .gz NDJSON partition and upsert into MongoDB.
+
+    Each worker process owns its own MongoClient (set up by _worker_init),
+    its own GIL, and its own CPU core — true parallel execution with no
+    socket contention.
+
+    Parameters
+    ----------
+    args : (gz_file_str, entity_type)
+
+    Returns
+    -------
+    dict with ``entity_type``, ``file``, ``records``, ``upserted``,
+    ``modified``, ``errors``.
+    """
+    gz_file_str, entity_type = args
+    gz_file = Path(gz_file_str)
+    db = _worker_state["db"]
+    collection = db[entity_type]
+    chunk_size = _worker_state["chunk_size"]
+
+    counts: dict[str, int] = {"records": 0, "upserted": 0, "modified": 0, "errors": 0}
+    ops: list[UpdateOne] = []
+
+    def _flush() -> None:
+        if not ops:
+            return
+        try:
+            result = collection.bulk_write(ops, ordered=False)
+            counts["upserted"] += len(result.upserted_ids)
+            counts["modified"] += result.modified_count
+        except Exception:  # noqa: BLE001
+            counts["errors"] += len(ops)
+        finally:
+            ops.clear()
+
+    with gzip.open(gz_file, "rt", encoding="utf-8") as fh:
+        for line in fh:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                doc = json.loads(line)
+            except json.JSONDecodeError:
+                counts["errors"] += 1
+                continue
+            doc_id = doc.get("id")
+            if not doc_id:
+                counts["errors"] += 1
+                continue
+            ops.append(UpdateOne({"id": doc_id}, {"$set": doc}, upsert=True))
+            counts["records"] += 1
+            if len(ops) >= chunk_size:
+                _flush()
+    _flush()
+
+    # Atomic checkpoint — $addToSet requires no read-modify-write, no locks.
+    db["etl_checkpoints"].update_one(
+        {"_id": f"openalex_{entity_type}"},
+        {"$addToSet": {"last_value": gz_file_str}},
+        upsert=True,
+    )
+    return {"entity_type": entity_type, "file": gz_file_str, **counts}
 
 ENTITY_TYPES = [
     "authors",
@@ -39,8 +158,8 @@ ENTITY_TYPES = [
     "works",
 ]
 
-# Default bulk size — works is ~250 M records; keep memory tight
-DEFAULT_CHUNK_SIZE = 500
+# Chunk size: 2000 docs per bulk_write balances memory and round-trip overhead
+DEFAULT_CHUNK_SIZE = 2000
 DEFAULT_MAX_WORKERS = 72
 
 
@@ -319,30 +438,30 @@ class OpenAlexExtractor(BaseExtractor):
         db_name: str,
         snapshot_dir: str,
         client: Any,
+        mongodb_uri: str,
         chunk_size: int = DEFAULT_CHUNK_SIZE,
         max_workers: int = DEFAULT_MAX_WORKERS,
     ) -> dict[str, Any]:
         """
-        Load ALL entity types into MongoDB using a single shared thread pool.
+        Load ALL entity types into MongoDB using a real ``multiprocessing.Pool``.
 
-        Unlike calling ``run()`` per entity (which wastes threads when small
-        entities finish early), this method builds a unified work queue of every
-        pending .gz file across all entities and feeds them to one
-        ``ThreadPoolExecutor``.  All 72 (or ``max_workers``) threads stay busy
-        until the last file is processed.
+        Uses ``_NoDaemonPool`` (non-daemon process override) to bypass the
+        Airflow daemon worker restriction.  Each worker process has its own
+        GIL and ``MongoClient``, delivering true CPU parallelism for gzip
+        decompression, JSON parsing, and MongoDB writes.
 
-        Checkpoints are maintained per entity and are updated atomically after
-        each file, so the run can be safely resumed if interrupted.
+        Checkpoints use ``$addToSet`` — atomic, no locking, no read-modify-write.
 
-        Returns
-        -------
-        dict
-            ``files_processed``, ``files_skipped``, ``total_records``,
-            ``total_errors``, ``elapsed_seconds``, ``per_entity`` breakdown.
+        Parameters
+        ----------
+        mongodb_uri : str
+            Passed to worker processes via ``_worker_init`` so each can open
+            its own ``MongoClient`` (workers cannot inherit the parent socket).
         """
         logger = logging.getLogger("airflow.task.OpenAlexExtractor")
 
-        # One extractor instance per entity (owns its collection + checkpoint refs)
+        # One extractor per entity — used only for index creation and
+        # reading the initial checkpoint (uses the parent's client).
         extractors: dict[str, OpenAlexExtractor] = {
             entity: cls(
                 mongodb_uri="",
@@ -355,111 +474,87 @@ class OpenAlexExtractor(BaseExtractor):
             for entity in ENTITY_TYPES
         }
 
-        # Build unified work queue: list of (extractor, gz_file)
-        all_work: list[tuple[OpenAlexExtractor, Path]] = []
+        # Build work queue: list of (gz_file_str, entity_type)
+        all_work: list[tuple[str, str]] = []
         skipped_total = 0
+        entity_total_files: dict[str, int] = {e: 0 for e in ENTITY_TYPES}
+
         for entity, ext in extractors.items():
             ckpt_key = f"openalex_{entity}"
             raw_ckpt = ext.get_checkpoint(ckpt_key)
             processed: set[str] = set(raw_ckpt) if isinstance(raw_ckpt, list) else set()
             files = ext._iter_partition_files()
             pending = [f for f in files if str(f) not in processed]
-            skipped_total += len(files) - len(pending)
-            all_work.extend((ext, f) for f in pending)
-            logger.info("[%s] %d pending, %d skipped", entity, len(pending), len(files) - len(pending))
+            skipped = len(files) - len(pending)
+            skipped_total += skipped
+            entity_total_files[entity] = len(pending)
+            all_work.extend((str(f), entity) for f in pending)
+            logger.info("[%s] %d pending, %d skipped", entity, len(pending), skipped)
 
         if not all_work:
-            logger.info("All %d files already processed across all entities.", skipped_total)
+            logger.info("All %d files already processed.", skipped_total)
             return {"files_processed": 0, "files_skipped": skipped_total}
 
+        total_files = len(all_work)
         logger.info(
-            "Total: %d pending files across %d entities — %d workers",
-            len(all_work), len(ENTITY_TYPES), max_workers,
+            "Total: %d files across %d entities — %d worker processes (non-daemon)",
+            total_files, len(ENTITY_TYPES), max_workers,
         )
 
-        total_files = len(all_work)
-
-        # Per-entity lock for checkpoint read-modify-write
-        locks: dict[str, threading.Lock] = {e: threading.Lock() for e in ENTITY_TYPES}
         entity_stats: dict[str, dict[str, int]] = {
             e: {"processed": 0, "records": 0, "upserted": 0, "errors": 0}
             for e in ENTITY_TYPES
         }
-        counter = {"done": 0}
-        counter_lock = threading.Lock()
-
-        def _process_one(item: tuple[OpenAlexExtractor, Path]) -> tuple[str, dict[str, int]]:
-            ext, gz_file = item
-            counts = ext._load_partition(gz_file)
-            ckpt_key = f"openalex_{ext.entity_type}"
-            with locks[ext.entity_type]:
-                raw = ext.get_checkpoint(ckpt_key)
-                done: set[str] = set(raw) if isinstance(raw, list) else set()
-                done.add(str(gz_file))
-                ext.save_checkpoint(ckpt_key, list(done))
-            return ext.entity_type, counts
-
+        done_count = 0
         t0 = time.monotonic()
 
-        # Per-entity totals for pending files (to show n/total per entity)
-        entity_total_files: dict[str, int] = {e: 0 for e in ENTITY_TYPES}
-        for ext, _ in all_work:
-            entity_total_files[ext.entity_type] += 1
-
-        with ThreadPoolExecutor(max_workers=max_workers) as pool:
-            futures = {pool.submit(_process_one, item): item for item in all_work}
-            for future in as_completed(futures):
-                _, gz_file = futures[future]
+        with _NoDaemonPool(
+            processes=max_workers,
+            initializer=_worker_init,
+            initargs=(mongodb_uri, db_name, chunk_size),
+        ) as pool:
+            for result in pool.imap_unordered(_process_file, all_work, chunksize=1):
                 try:
-                    entity, counts = future.result()
+                    entity = result["entity_type"]
                     entity_stats[entity]["processed"] += 1
-                    entity_stats[entity]["records"] += counts.get("records", 0)
-                    entity_stats[entity]["upserted"] += counts.get("upserted", 0)
-                    entity_stats[entity]["errors"] += counts.get("errors", 0)
-                    with counter_lock:
-                        counter["done"] += 1
-                        n = counter["done"]
-                    if n % 50 == 0 or n == total_files:
+                    entity_stats[entity]["records"] += result.get("records", 0)
+                    entity_stats[entity]["upserted"] += result.get("upserted", 0)
+                    entity_stats[entity]["errors"] += result.get("errors", 0)
+                    done_count += 1
+                    if done_count % 50 == 0 or done_count == total_files:
                         elapsed = time.monotonic() - t0
-                        rate = n / elapsed if elapsed > 0 else 0
+                        rate = done_count / elapsed if elapsed > 0 else 0
                         logger.info(
                             "Progress: %d/%d files (%.1f files/s) elapsed=%.0fs",
-                            n, total_files, rate, elapsed,
+                            done_count, total_files, rate, elapsed,
                         )
-                        # Per-entity breakdown: files done / total  |  docs
-                        lines = []
-                        for e in ENTITY_TYPES:
-                            s = entity_stats[e]
-                            if entity_total_files[e] == 0:
-                                continue
-                            lines.append(
-                                f"  {e}: {s['processed']}/{entity_total_files[e]} files"
-                                f" | {s['records']:,} docs"
-                                + (f" | {s['errors']} errors" if s["errors"] else "")
-                            )
-                        logger.info("Per-entity status:\n%s", "\n".join(lines))
+                        lines = [
+                            f"  {e}: {entity_stats[e]['processed']}/{entity_total_files[e]} files"
+                            f" | {entity_stats[e]['records']:,} docs"
+                            + (f" | {entity_stats[e]['errors']} errors" if entity_stats[e]["errors"] else "")
+                            for e in ENTITY_TYPES
+                            if entity_total_files[e] > 0
+                        ]
+                        logger.info("Per-entity:\n%s", "\n".join(lines))
                 except Exception as exc:  # noqa: BLE001
-                    logger.error("Failed %s: %s", gz_file.name, exc)
+                    logger.error("Worker error: %s", exc)
 
         elapsed = round(time.monotonic() - t0, 2)
         total_records = sum(s["records"] for s in entity_stats.values())
         total_errors = sum(s["errors"] for s in entity_stats.values())
 
-        summary_lines = []
-        for e in ENTITY_TYPES:
-            s = entity_stats[e]
-            if entity_total_files[e] == 0 and s["records"] == 0:
-                continue
-            summary_lines.append(
-                f"  {e}: {s['processed']} files | {s['records']:,} docs"
-                + (f" | {s['errors']} errors" if s["errors"] else "")
-            )
+        summary = [
+            f"  {e}: {entity_stats[e]['processed']} files | {entity_stats[e]['records']:,} docs"
+            + (f" | {entity_stats[e]['errors']} errors" if entity_stats[e]["errors"] else "")
+            for e in ENTITY_TYPES
+            if entity_total_files[e] > 0
+        ]
         logger.info(
-            "Completed — %d files in %.1fs — total records=%d errors=%d\nFinal per-entity:\n%s",
-            counter["done"], elapsed, total_records, total_errors, "\n".join(summary_lines),
+            "Completed — %d files in %.1fs — records=%d errors=%d\nFinal per-entity:\n%s",
+            done_count, elapsed, total_records, total_errors, "\n".join(summary),
         )
         return {
-            "files_processed": counter["done"],
+            "files_processed": done_count,
             "files_skipped": skipped_total,
             "total_records": total_records,
             "total_errors": total_errors,

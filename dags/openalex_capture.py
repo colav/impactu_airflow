@@ -121,22 +121,34 @@ with DAG(
     # Task 3 — Load ALL entities with a single shared thread pool
     # ------------------------------------------------------------------
     def load_all_entities(**context: Any) -> dict[str, Any]:
-        """Load all OpenAlex entities using one unified thread pool.
+        """Load all OpenAlex entities using one unified ProcessPoolExecutor.
 
-        All pending .gz files across every entity type are fed to a single
-        ThreadPoolExecutor so CPU threads are never idle waiting for a small
-        entity to finish before a large one can use them.
+        Each worker process owns its GIL and MongoDB connection, enabling
+        true CPU parallelism for gzip decompression and JSON parsing.
         """
+        from airflow.hooks.base import BaseHook
         from extract.openalex.openalex_extractor import OpenAlexExtractor  # late import
 
         params = context["params"]
         snapshot_dir = f"{params['snapshot_base_dir']}/openalex-snapshot"
+        conn_id = params["mongo_conn_id"]
 
-        hook = MongoHook(params["mongo_conn_id"])
+        # Build URI from the Airflow connection (workers cannot use MongoHook)
+        conn = BaseHook.get_connection(conn_id)
+        host = conn.host or "localhost"
+        port = conn.port or 27017
+        if conn.login and conn.password:
+            mongodb_uri = f"mongodb://{conn.login}:{conn.password}@{host}:{port}/"
+        else:
+            mongodb_uri = f"mongodb://{host}:{port}/"
+
+        from airflow.providers.mongo.hooks.mongo import MongoHook
+        hook = MongoHook(conn_id)
         return OpenAlexExtractor.run_all(
             db_name=params["db_name"],
             snapshot_dir=snapshot_dir,
             client=hook.get_conn(),
+            mongodb_uri=mongodb_uri,
             chunk_size=params["chunk_size"],
             max_workers=params["max_workers"],
         )
