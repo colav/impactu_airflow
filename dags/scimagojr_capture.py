@@ -4,6 +4,7 @@ import os
 from datetime import datetime, timedelta
 
 from airflow import DAG
+from airflow.models.baseoperator import chain
 from airflow.providers.mongo.hooks.mongo import MongoHook
 from airflow.providers.standard.operators.python import PythonOperator
 from airflow.sdk import Param
@@ -84,16 +85,17 @@ with DAG(
 ) as dag:
     years = list(range(1999, datetime.now().year + 1))
 
-    extract_task = PythonOperator.partial(
-        task_id="extract_and_load_scimagojr",
-        python_callable=run_extraction_by_year,
-    ).expand(
-        op_kwargs=[
-            {
+    tasks = [
+        PythonOperator(
+            task_id=f"extract_year_{year}",
+            python_callable=run_extraction_by_year,
+            op_kwargs={
                 "year": year,
                 "mongo_conn_id": "{{ params.mongo_conn_id }}",
                 "mongo_db": "{{ params.mongo_db }}",
-            }
-            for year in years
-        ]
-    )
+            },
+        )
+        for year in years
+    ]
+
+    chain(*tasks)
