@@ -136,8 +136,10 @@ with DAG(
         num_workers = int(params["num_workers"])
         collection = _get_mongo_collection(params)
 
-        total = collection.count_documents({"title": {"$exists": True}})
-        logging.info("Total documents with title: %d", total)
+        # Use estimated count (metadata-based, instant) to split chunks.
+        # Docs without title are rare; each chunk will skip them during indexing.
+        total = collection.estimated_document_count()
+        logging.info("Total documents (estimated): %d", total)
 
         if total == 0:
             return [{"offset": 0, "chunk_size": 0}]
