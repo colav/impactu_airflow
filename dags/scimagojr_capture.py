@@ -51,9 +51,8 @@ def run_extraction_by_year(
     # Import extractor here to avoid module-level import side-effects
     from extract.scimagojr.scimagojr_extractor import ScimagoJRExtractor
 
-    # Use AIRFLOW_HOME for cache directory to avoid writing to /opt/airflow
-    airflow_home = os.environ.get("AIRFLOW_HOME", os.getcwd())
-    cache_dir = os.path.join(airflow_home, "cache", "scimagojr")
+    # Use /tmp for cache to avoid permission issues with /opt/airflow
+    cache_dir = os.path.join("/tmp", "scimagojr_cache")
     extractor = ScimagoJRExtractor("", mongo_db, client=client, cache_dir=cache_dir)
     try:
         extractor.process_year(year, force_redownload=force_redownload, chunk_size=chunk_size)
