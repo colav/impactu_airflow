@@ -131,26 +131,41 @@ with DAG(
 
     @task
     def prepare_chunks(**context: Any) -> list[dict]:
-        """Count documents and return a list of {offset, chunk_size} dicts."""
+        """Split the collection into N chunks using _id range boundaries."""
+
         params = context["params"]
         num_workers = int(params["num_workers"])
         collection = _get_mongo_collection(params)
 
-        # Use estimated count (metadata-based, instant) to split chunks.
-        # Docs without title are rare; each chunk will skip them during indexing.
         total = collection.estimated_document_count()
         logging.info("Total documents (estimated): %d", total)
 
         if total == 0:
-            return [{"offset": 0, "chunk_size": 0}]
+            return [{"min_id": "", "max_id": ""}]
 
         chunk_size = (total + num_workers - 1) // num_workers
-        chunks = [{"offset": i * chunk_size, "chunk_size": chunk_size} for i in range(num_workers)]
-        logging.info("Split into %d chunks of ~%d docs each", len(chunks), chunk_size)
+
+        # Sample _id boundaries via skip: only num_workers samples, not full scan
+        boundaries: list[str] = []
+        for i in range(num_workers - 1):
+            offset = (i + 1) * chunk_size
+            doc = collection.find_one({}, {"_id": 1}, skip=offset, sort=[("_id", 1)])
+            if doc:
+                boundaries.append(str(doc["_id"]))
+
+        chunks = []
+        prev = ""
+        for b in boundaries:
+            chunks.append({"min_id": prev, "max_id": b})
+            prev = b
+        chunks.append({"min_id": prev, "max_id": ""})
+
+        logging.info("Split into %d chunks by _id range", len(chunks))
         return chunks
 
-    def load_chunk(offset: int, chunk_size: int, **context: Any) -> None:
-        """Index one slice of the MongoDB cursor into Elasticsearch."""
+    def load_chunk(min_id: str, max_id: str, **context: Any) -> None:
+        """Index one _id-range slice of the collection into Elasticsearch."""
+        from bson import ObjectId
         from kahi_impactu_utils.String import parse_html, parse_mathml
         from mohan.Similarity import Similarity
 
@@ -162,21 +177,23 @@ with DAG(
         s = Similarity(es_index, es_uri=es_host, es_auth=es_auth)
         collection = _get_mongo_collection(params)
 
-        cursor = (
-            collection.find(
-                {"title": {"$exists": True}},
-                {
-                    "title": 1,
-                    "primary_location.source": 1,
-                    "publication_year": 1,
-                    "biblio": 1,
-                    "authorships": 1,
-                    "_id": 1,
-                },
-            )
-            .skip(offset)
-            .limit(chunk_size)
-        )
+        id_filter: dict = {"title": {"$exists": True}}
+        if min_id:
+            id_filter["_id"] = {"$gte": ObjectId(min_id)}
+        if max_id:
+            id_filter.setdefault("_id", {})["$lt"] = ObjectId(max_id)
+
+        cursor = collection.find(
+            id_filter,
+            {
+                "title": 1,
+                "primary_location.source": 1,
+                "publication_year": 1,
+                "biblio": 1,
+                "authorships": 1,
+                "_id": 1,
+            },
+        ).sort("_id", 1)
 
         es_entries: list[dict] = []
         counter = 0
@@ -224,14 +241,16 @@ with DAG(
 
             counter += 1
             if counter % 10000 == 0:
-                logging.info("Chunk offset=%d progress: %d docs indexed", offset, counter)
+                logging.info(
+                    "Chunk min_id=%s progress: %d docs indexed", min_id or "start", counter
+                )
 
         if es_entries:
             s.insert_bulk(es_entries)
 
         logging.info(
-            "Chunk offset=%d done. Indexed: %d | Skipped (no title): %d",
-            offset,
+            "Chunk min_id=%s done. Indexed: %d | Skipped (no title): %d",
+            min_id or "start",
             counter,
             count_nones,
         )
