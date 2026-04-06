@@ -481,7 +481,7 @@ class OpenAlexExtractor(BaseExtractor):
         # Build work queue: list of (gz_file_str, entity_type)
         all_work: list[tuple[str, str]] = []
         skipped_total = 0
-        entity_total_files: dict[str, int] = {e: 0 for e in ENTITY_TYPES}
+        entity_total_files: dict[str, int] = dict.fromkeys(ENTITY_TYPES, 0)
 
         for entity, ext in extractors.items():
             ckpt_key = f"openalex_{entity}"
