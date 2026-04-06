@@ -122,12 +122,32 @@ with DAG(
         es_host, es_auth = _resolve_es(params)
         es_index = params["es_index"]
 
-        s = Similarity(es_index, es_uri=es_host, es_auth=es_auth)
+        s = Similarity.__new__(Similarity)
+        auth = es_auth or ("elastic", "colav")
+        from elasticsearch import Elasticsearch
+
+        s.es = Elasticsearch(es_host, basic_auth=auth, timeout=120)
+        s.es_index = es_index
+        s.es_req_timeout = 120
+
         try:
-            s.delete_index(es_index)
+            s.es.indices.delete(index=es_index)
             logging.info("Deleted index '%s'", es_index)
         except NotFoundError:
             logging.info("Index '%s' does not exist, skipping delete.", es_index)
+
+    def create_index(**context: Any) -> None:
+        """Create the Elasticsearch index (once, before parallel chunks)."""
+        from elasticsearch import Elasticsearch
+
+        params = context["params"]
+        es_host, es_auth = _resolve_es(params)
+        es_index = params["es_index"]
+
+        auth = es_auth or ("elastic", "colav")
+        es = Elasticsearch(es_host, basic_auth=auth, timeout=120)
+        es.indices.create(index=es_index)
+        logging.info("Created index '%s'", es_index)
 
     @task
     def prepare_chunks(**context: Any) -> list[dict]:
@@ -166,6 +186,7 @@ with DAG(
     def load_chunk(min_id: str, max_id: str, **context: Any) -> None:
         """Index one _id-range slice of the collection into Elasticsearch."""
         from bson import ObjectId
+        from elasticsearch import Elasticsearch
         from kahi_impactu_utils.String import parse_html, parse_mathml
         from mohan.Similarity import Similarity
 
@@ -174,7 +195,12 @@ with DAG(
         es_index = params["es_index"]
         bulk_size = int(params["bulk_size"])
 
-        s = Similarity(es_index, es_uri=es_host, es_auth=es_auth)
+        # Connect without calling ensure_index — index was created by create_index task
+        auth = es_auth or ("elastic", "colav")
+        s = Similarity.__new__(Similarity)
+        s.es = Elasticsearch(es_host, basic_auth=auth, timeout=120)
+        s.es_index = es_index
+        s.es_req_timeout = 120
         collection = _get_mongo_collection(params)
 
         id_filter: dict = {"title": {"$exists": True}}
@@ -256,10 +282,11 @@ with DAG(
         )
 
     delete_task = PythonOperator(task_id="delete_index", python_callable=delete_index)
+    create_task = PythonOperator(task_id="create_index", python_callable=create_index)
     chunks = prepare_chunks()
     load_tasks = PythonOperator.partial(
         task_id="load_chunk",
         python_callable=load_chunk,
     ).expand(op_kwargs=chunks)
 
-    delete_task >> chunks >> load_tasks
+    delete_task >> create_task >> chunks >> load_tasks
