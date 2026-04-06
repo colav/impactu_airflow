@@ -21,6 +21,7 @@ from airflow import DAG
 from airflow.providers.mongo.hooks.mongo import MongoHook
 from airflow.providers.standard.operators.bash import BashOperator
 from airflow.providers.standard.operators.python import PythonOperator
+from airflow.providers.standard.operators.trigger_dagrun import TriggerDagRunOperator
 from airflow.sdk import Param
 
 from extract.openalex.openalex_extractor import DEFAULT_MAX_WORKERS
@@ -73,7 +74,6 @@ with DAG(
     catchup=False,
     tags=["openalex", "capture"],
 ) as dag:
-
     # ------------------------------------------------------------------
     # Task 1 — S3 sync (BashOperator, idempotent)
     # ------------------------------------------------------------------
@@ -127,6 +127,7 @@ with DAG(
         true CPU parallelism for gzip decompression and JSON parsing.
         """
         from airflow.hooks.base import BaseHook
+
         from extract.openalex.openalex_extractor import OpenAlexExtractor  # late import
 
         params = context["params"]
@@ -143,6 +144,7 @@ with DAG(
             mongodb_uri = f"mongodb://{host}:{port}/"
 
         from airflow.providers.mongo.hooks.mongo import MongoHook
+
         hook = MongoHook(conn_id)
         return OpenAlexExtractor.run_all(
             db_name=params["db_name"],
@@ -158,7 +160,14 @@ with DAG(
         python_callable=load_all_entities,
     )
 
+    trigger_es_load = TriggerDagRunOperator(
+        task_id="trigger_load_elasticsearch",
+        trigger_dag_id="load_elasticsearch_openalex",
+        wait_for_completion=False,
+        doc_md="Trigger Elasticsearch indexing of OpenAlex works after MongoDB load completes.",
+    )
+
     # ------------------------------------------------------------------
     # Dependencies
     # ------------------------------------------------------------------
-    sync_snapshot >> prepare >> load_entities
+    sync_snapshot >> prepare >> load_entities >> trigger_es_load

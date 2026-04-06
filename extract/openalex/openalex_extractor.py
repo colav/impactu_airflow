@@ -7,7 +7,9 @@ import json
 import logging
 import multiprocessing
 import multiprocessing.pool
+import threading
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any
 
@@ -37,8 +39,9 @@ class _NonDaemonProcess(multiprocessing.Process):
     """
 
     def start(self) -> None:
-        import multiprocessing.process as _mpp
-        cfg = _mpp._current_process._config
+        import multiprocessing
+
+        cfg = multiprocessing.current_process()._config  # type: ignore[attr-defined]
         was = cfg.pop("daemon", None)
         try:
             super().start()
@@ -51,7 +54,7 @@ class _NoDaemonPool(multiprocessing.pool.Pool):
     """Pool that creates non-daemon workers from inside an Airflow daemon task."""
 
     @staticmethod
-    def Process(ctx: Any, *args: Any, **kwds: Any) -> _NonDaemonProcess:  # type: ignore[override]
+    def Process(ctx: Any, *args: Any, **kwds: Any) -> _NonDaemonProcess:  # type: ignore[override]  # noqa: N802
         kwds.pop("daemon", None)
         return _NonDaemonProcess(*args, **kwds)
 
@@ -133,6 +136,7 @@ def _process_file(args: tuple[str, str]) -> dict[str, Any]:
         upsert=True,
     )
     return {"entity_type": entity_type, "file": gz_file_str, **counts}
+
 
 ENTITY_TYPES = [
     "authors",
@@ -498,12 +502,13 @@ class OpenAlexExtractor(BaseExtractor):
         total_files = len(all_work)
         logger.info(
             "Total: %d files across %d entities — %d worker processes (non-daemon)",
-            total_files, len(ENTITY_TYPES), max_workers,
+            total_files,
+            len(ENTITY_TYPES),
+            max_workers,
         )
 
         entity_stats: dict[str, dict[str, int]] = {
-            e: {"processed": 0, "records": 0, "upserted": 0, "errors": 0}
-            for e in ENTITY_TYPES
+            e: {"processed": 0, "records": 0, "upserted": 0, "errors": 0} for e in ENTITY_TYPES
         }
         done_count = 0
         t0 = time.monotonic()
@@ -526,12 +531,19 @@ class OpenAlexExtractor(BaseExtractor):
                         rate = done_count / elapsed if elapsed > 0 else 0
                         logger.info(
                             "Progress: %d/%d files (%.1f files/s) elapsed=%.0fs",
-                            done_count, total_files, rate, elapsed,
+                            done_count,
+                            total_files,
+                            rate,
+                            elapsed,
                         )
                         lines = [
                             f"  {e}: {entity_stats[e]['processed']}/{entity_total_files[e]} files"
                             f" | {entity_stats[e]['records']:,} docs"
-                            + (f" | {entity_stats[e]['errors']} errors" if entity_stats[e]["errors"] else "")
+                            + (
+                                f" | {entity_stats[e]['errors']} errors"
+                                if entity_stats[e]["errors"]
+                                else ""
+                            )
                             for e in ENTITY_TYPES
                             if entity_total_files[e] > 0
                         ]
@@ -551,7 +563,11 @@ class OpenAlexExtractor(BaseExtractor):
         ]
         logger.info(
             "Completed — %d files in %.1fs — records=%d errors=%d\nFinal per-entity:\n%s",
-            done_count, elapsed, total_records, total_errors, "\n".join(summary),
+            done_count,
+            elapsed,
+            total_records,
+            total_errors,
+            "\n".join(summary),
         )
         return {
             "files_processed": done_count,
