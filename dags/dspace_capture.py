@@ -208,7 +208,7 @@ with DAG(
     start_date=datetime(2026, 1, 1),
     catchup=False,
     is_paused_upon_creation=True,
-    params={"mongo_conn_id": "mongodb_default", "mongo_db": "dspace"},
+    params={"mongo_conn_id": "mongodb_default", "mongo_db": "oxomoc_colombia"},
 ) as dag:
     endpoints = load_config()
 

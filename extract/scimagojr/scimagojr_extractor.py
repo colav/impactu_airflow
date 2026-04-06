@@ -118,7 +118,7 @@ class ScimagoJRExtractor(BaseExtractor):
             params = {"year": str(year), "type": "all", "out": "xls"}
             self.logger.info(f"Downloading data for year {year}...")
 
-            response = requests.get(self.base_url, params=params, impersonate="chrome")
+            response = requests.get(self.base_url, params=params, impersonate="chrome124")
             response.raise_for_status()
             content = response.text
 
