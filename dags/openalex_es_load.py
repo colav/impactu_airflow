@@ -17,7 +17,7 @@ from airflow.providers.standard.operators.python import PythonOperator
 from airflow.sdk import Param
 
 with DAG(
-    dag_id="load_elasticsearch_openalex",
+    dag_id="openalex_es_load",
     default_args={
         "owner": "impactu",
         "retries": 2,

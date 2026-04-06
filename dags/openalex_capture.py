@@ -162,7 +162,7 @@ with DAG(
 
     trigger_es_load = TriggerDagRunOperator(
         task_id="trigger_load_elasticsearch",
-        trigger_dag_id="load_elasticsearch_openalex",
+        trigger_dag_id="openalex_es_load",
         wait_for_completion=False,
         doc_md="Trigger Elasticsearch indexing of OpenAlex works after MongoDB load completes.",
     )
