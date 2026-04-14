@@ -123,6 +123,8 @@ def _process_file(args: tuple[str, str]) -> dict[str, Any]:
             if not doc_id:
                 counts["errors"] += 1
                 continue
+            if entity_type == "works" and doc.get("is_xpac") is True:
+                continue
             ops.append(UpdateOne({"id": doc_id}, {"$set": doc}, upsert=True))
             counts["records"] += 1
             if len(ops) >= chunk_size:

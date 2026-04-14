@@ -229,3 +229,4 @@ airflow.db
 airflow.db-*
 .airflow/
 ror_import/
+openalex_load
