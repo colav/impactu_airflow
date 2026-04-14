@@ -1,0 +1,258 @@
+"""OpenAlexCO extractor: Colombia cut from the full OpenAlex MongoDB database."""
+
+from __future__ import annotations
+
+import time
+from typing import Any
+
+from joblib import Parallel, delayed
+from pymongo import MongoClient
+
+from extract.base_extractor import BaseExtractor
+
+# ---------------------------------------------------------------------------
+# Collections to copy verbatim (full copy, no country filter)
+# ---------------------------------------------------------------------------
+COPY_COLLECTIONS = [
+    "concepts",
+    "funders",
+    "institutions",
+    "publishers",
+    "sources",
+    "domains",
+    "fields",
+    "subfields",
+    "topics",
+]
+
+
+class OpenAlexCOExtractor(BaseExtractor):
+    """
+    Extracts the Colombia cut from the full OpenAlex MongoDB database.
+
+    Steps (mirroring the original colombia_cut.py):
+    1. Works with Colombian authorship (aggregate $out).
+    2. Works from Colombian sources (parallel joblib).
+    3. Works by DOI match across multiple source databases.
+    4. Works by Minciencias Gruplac/CvLAC title+author similarity.
+    5. Dedup works via aggregate.
+    6. Authors referenced in works.
+    7. Verbatim copy of auxiliary collections.
+
+    Parameters
+    ----------
+    mongodb_uri : str
+        MongoDB connection URI.
+    db_in : str
+        Source database name (default: ``openalex``).
+    db_out : str
+        Target database name (default: ``openalexco``).
+    es_index : str
+        Elasticsearch index name used by Minciencias similarity search.
+    jobs : int
+        Parallelism for joblib tasks.
+    backend : str
+        joblib backend (default: ``threading``).
+    es_uri : str
+        Elasticsearch URI.
+    es_auth : tuple[str, str]
+        Elasticsearch (user, password).
+    client : pymongo.MongoClient, optional
+        Existing MongoClient (overrides mongodb_uri).
+    """
+
+    def __init__(
+        self,
+        mongodb_uri: str,
+        db_in: str = "openalex",
+        db_out: str = "openalexco",
+        es_index: str = "openalex_index",
+        jobs: int = 72,
+        backend: str = "threading",
+        es_uri: str = "http://localhost:9200",
+        es_auth: tuple[str, str] = ("elastic", "colav"),
+        client: Any = None,
+    ) -> None:
+        # BaseExtractor expects (uri, db_name, collection_name) — use db_out as primary db.
+        super().__init__(mongodb_uri, db_out, collection_name="works", client=client)
+        self.mongodb_uri = mongodb_uri
+        self.db_in = db_in
+        self.db_out = db_out
+        self.es_index = es_index
+        self.jobs = jobs
+        self.backend = backend
+        self.es_uri = es_uri
+        self.es_auth = es_auth
+        # Raw MongoClient for multi-db access
+        self._client: MongoClient = self.client  # type: ignore[assignment]
+        self.create_indexes()
+
+    def create_indexes(self) -> None:
+        self._client[self.db_out]["works"].create_index(
+            [("type", 1), ("type_crossref", 1), ("id", 1)]
+        )
+
+    # ------------------------------------------------------------------
+    # Step 1 — Colombian authorship works
+    # ------------------------------------------------------------------
+    def _cut_works_by_authorship(self) -> None:
+        self.logger.info("Step 1: cutting works by Colombian authorship …")
+        t0 = time.time()
+        pipeline = [
+            {"$project": {"_id": 0}},
+            {
+                "$match": {
+                    "$or": [
+                        {"authorships.countries": "CO"},
+                        {"authorships.institutions.country_code": "CO"},
+                    ]
+                }
+            },
+            {"$out": {"db": self.db_out, "coll": "works"}},
+        ]
+        self._client[self.db_in]["works"].aggregate(pipeline)
+        self.logger.info("Step 1 done in %.1fs", time.time() - t0)
+
+    # ------------------------------------------------------------------
+    # Step 2 — Works from Colombian sources
+    # ------------------------------------------------------------------
+    def _cut_works_by_sources(self) -> None:
+        self.logger.info("Step 2: cutting works from Colombian sources …")
+        t0 = time.time()
+        self._client[self.db_in]["works"].create_index("id")
+        self._client[self.db_in]["works"].create_index("locations.source.id")
+        self._client[self.db_out]["works"].create_index("id")
+
+        sources_ids = list(
+            self._client[self.db_in]["sources"].find({"country_code": "CO"}, {"id": 1})
+        )
+
+        def _get_pub_works(pid: str) -> list[dict]:
+            c = MongoClient(self.mongodb_uri)
+            return list(c[self.db_in]["works"].find({"locations.source.id": pid}))
+
+        pworks = Parallel(n_jobs=self.jobs, verbose=10, backend=self.backend)(
+            delayed(_get_pub_works)(s["id"]) for s in sources_ids
+        )
+        works: list[dict] = []
+        for pw in pworks or []:
+            works.extend(pw)
+
+        def _insert_if_new(work: dict) -> None:
+            c = MongoClient(self.mongodb_uri)
+            if c[self.db_out]["works"].count_documents({"id": work["id"]}) == 0:
+                c[self.db_out]["works"].insert_one(work)
+
+        Parallel(n_jobs=self.jobs, verbose=10, backend=self.backend)(
+            delayed(_insert_if_new)(w) for w in works
+        )
+        self.logger.info("Step 2 done in %.1fs", time.time() - t0)
+
+    # ------------------------------------------------------------------
+    # Step 3 — DOI-based cut
+    # ------------------------------------------------------------------
+    def _cut_works_by_dois(self) -> None:
+        from extract.openalexco.colombia_cut_dois import colombia_cut_dois
+
+        self.logger.info("Step 3: cutting works by DOI …")
+        self._client[self.db_in]["works"].create_index("doi")
+        t0 = time.time()
+        colombia_cut_dois(
+            db_in=self.db_in,
+            db_out=self.db_out,
+            jobs=self.jobs,
+            backend=self.backend,
+            mongo_uri=self.mongodb_uri,
+        )
+        self.logger.info("Step 3 done in %.1fs", time.time() - t0)
+
+    # ------------------------------------------------------------------
+    # Step 4 — Minciencias similarity cut
+    # ------------------------------------------------------------------
+    def _cut_works_by_minciencias(self) -> None:
+        from extract.openalexco.colombia_cut_minciencias import colombia_cut_minciencias
+
+        self.logger.info("Step 4: cutting works via Minciencias similarity …")
+        t0 = time.time()
+        colombia_cut_minciencias(
+            db_in=self.db_in,
+            db_out=self.db_out,
+            es_index=self.es_index,
+            jobs=self.jobs,
+            backend=self.backend,
+            mongo_uri=self.mongodb_uri,
+            es_uri=self.es_uri,
+            es_auth=self.es_auth,
+        )
+        self.logger.info("Step 4 done in %.1fs", time.time() - t0)
+
+    # ------------------------------------------------------------------
+    # Step 5 — Dedup works
+    # ------------------------------------------------------------------
+    def _dedup_works(self) -> None:
+        self.logger.info("Step 5: deduplicating works …")
+        t0 = time.time()
+        pipeline = [
+            {"$group": {"_id": "$id", "uniquedoc": {"$first": "$$ROOT"}}},
+            {"$replaceRoot": {"newRoot": "$uniquedoc"}},
+        ]
+        for doc in self._client[self.db_out]["works"].aggregate(pipeline):
+            self._client[self.db_out]["works_tmp"].insert_one(doc)
+        self._client[self.db_out]["works"].drop()
+        self._client[self.db_out]["works_tmp"].rename("works")
+        self.logger.info("Step 5 done in %.1fs", time.time() - t0)
+
+    # ------------------------------------------------------------------
+    # Step 6 — Authors
+    # ------------------------------------------------------------------
+    def _cut_authors(self) -> None:
+        self.logger.info("Step 6: extracting referenced authors …")
+        t0 = time.time()
+        self._client[self.db_in]["authors"].create_index("id")
+        pipeline = [
+            {"$project": {"_id": 0, "authorships.author.id": 1}},
+            {"$unwind": "$authorships"},
+            {"$group": {"_id": None, "authors": {"$addToSet": "$authorships.author.id"}}},
+            {"$unwind": "$authors"},
+            {"$project": {"_id": 0}},
+        ]
+        authors_ids = list(self._client[self.db_out]["works"].aggregate(pipeline))
+
+        def _save_author(aid: str) -> None:
+            c = MongoClient(self.mongodb_uri)
+            author = c[self.db_in]["authors"].find_one({"id": aid})
+            if author is not None:
+                c[self.db_out]["authors"].insert_one(author)
+
+        Parallel(n_jobs=self.jobs, verbose=10, backend=self.backend, batch_size=100)(
+            delayed(_save_author)(a["authors"]) for a in authors_ids
+        )
+        self.logger.info("Step 6 done in %.1fs", time.time() - t0)
+
+    # ------------------------------------------------------------------
+    # Step 7 — Verbatim copy of auxiliary collections
+    # ------------------------------------------------------------------
+    def _copy_auxiliary_collections(self) -> None:
+        for coll in COPY_COLLECTIONS:
+            self.logger.info("Step 7: copying %s …", coll)
+            t0 = time.time()
+            pipeline_copy = [
+                {"$match": {}},
+                {"$out": {"db": self.db_out, "coll": coll}},
+            ]
+            self._client[self.db_in][coll].aggregate(pipeline_copy)
+            self.logger.info("  %s done in %.1fs", coll, time.time() - t0)
+
+    # ------------------------------------------------------------------
+    # Public entry point
+    # ------------------------------------------------------------------
+    def run(self, **kwargs: Any) -> None:  # type: ignore[override]
+        """Execute the full Colombia cut pipeline."""
+        self._cut_works_by_authorship()
+        self._cut_works_by_sources()
+        self._cut_works_by_dois()
+        self._cut_works_by_minciencias()
+        self._dedup_works()
+        self._cut_authors()
+        self._copy_auxiliary_collections()
+        self.logger.info("Colombia cut complete.")
