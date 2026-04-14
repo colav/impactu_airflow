@@ -63,7 +63,6 @@ class OpenAlexCOExtractor(BaseExtractor):
 
     def __init__(
         self,
-        mongodb_uri: str,
         db_in: str = "openalex",
         db_out: str = "openalexco",
         es_index: str = "openalex_index",
@@ -72,10 +71,10 @@ class OpenAlexCOExtractor(BaseExtractor):
         es_uri: str = "http://localhost:9200",
         es_auth: tuple[str, str] = ("elastic", "colav"),
         client: Any = None,
+        mongodb_uri: str = "",
     ) -> None:
         # BaseExtractor expects (uri, db_name, collection_name) — use db_out as primary db.
         super().__init__(mongodb_uri, db_out, collection_name="works", client=client)
-        self.mongodb_uri = mongodb_uri
         self.db_in = db_in
         self.db_out = db_out
         self.es_index = es_index
@@ -127,9 +126,11 @@ class OpenAlexCOExtractor(BaseExtractor):
             self._client[self.db_in]["sources"].find({"country_code": "CO"}, {"id": 1})
         )
 
+        # MongoClient is thread-safe — reuse self._client across threading workers.
+        client = self._client
+
         def _get_pub_works(pid: str) -> list[dict]:
-            c = MongoClient(self.mongodb_uri)
-            return list(c[self.db_in]["works"].find({"locations.source.id": pid}))
+            return list(client[self.db_in]["works"].find({"locations.source.id": pid}))
 
         pworks = Parallel(n_jobs=self.jobs, verbose=10, backend=self.backend)(
             delayed(_get_pub_works)(s["id"]) for s in sources_ids
@@ -139,9 +140,8 @@ class OpenAlexCOExtractor(BaseExtractor):
             works.extend(pw)
 
         def _insert_if_new(work: dict) -> None:
-            c = MongoClient(self.mongodb_uri)
-            if c[self.db_out]["works"].count_documents({"id": work["id"]}) == 0:
-                c[self.db_out]["works"].insert_one(work)
+            if client[self.db_out]["works"].count_documents({"id": work["id"]}) == 0:
+                client[self.db_out]["works"].insert_one(work)
 
         Parallel(n_jobs=self.jobs, verbose=10, backend=self.backend)(
             delayed(_insert_if_new)(w) for w in works
@@ -162,7 +162,7 @@ class OpenAlexCOExtractor(BaseExtractor):
             db_out=self.db_out,
             jobs=self.jobs,
             backend=self.backend,
-            mongo_uri=self.mongodb_uri,
+            client=self._client,
         )
         self.logger.info("Step 3 done in %.1fs", time.time() - t0)
 
@@ -180,7 +180,7 @@ class OpenAlexCOExtractor(BaseExtractor):
             es_index=self.es_index,
             jobs=self.jobs,
             backend=self.backend,
-            mongo_uri=self.mongodb_uri,
+            client=self._client,
             es_uri=self.es_uri,
             es_auth=self.es_auth,
         )
@@ -218,11 +218,12 @@ class OpenAlexCOExtractor(BaseExtractor):
         ]
         authors_ids = list(self._client[self.db_out]["works"].aggregate(pipeline))
 
+        client = self._client
+
         def _save_author(aid: str) -> None:
-            c = MongoClient(self.mongodb_uri)
-            author = c[self.db_in]["authors"].find_one({"id": aid})
+            author = client[self.db_in]["authors"].find_one({"id": aid})
             if author is not None:
-                c[self.db_out]["authors"].insert_one(author)
+                client[self.db_out]["authors"].insert_one(author)
 
         Parallel(n_jobs=self.jobs, verbose=10, backend=self.backend, batch_size=100)(
             delayed(_save_author)(a["authors"]) for a in authors_ids

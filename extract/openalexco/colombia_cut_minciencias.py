@@ -145,12 +145,12 @@ def colombia_cut_minciencias(
     es_index: str,
     jobs: int = 20,
     backend: str = "threading",
-    mongo_uri: str = "mongodb://localhost:27017",
+    client: MongoClient | None = None,
     es_uri: str = "http://localhost:9200",
     es_auth: tuple[str, str] = ("elastic", "colav"),
 ) -> None:
     """Insert works from Gruplac/CvLAC into the Colombia cut via ES similarity."""
-    c = MongoClient(mongo_uri)
+    c: MongoClient = client if client is not None else MongoClient()
     gr_col = c[YUKU_DB][YUKU_GRCOL]
     data = list(gr_col.aggregate(_PIPELINE, allowDiskUse=True))
     data.extend(list(gr_col.aggregate(_PIPELINE_ZEROS, allowDiskUse=True)))

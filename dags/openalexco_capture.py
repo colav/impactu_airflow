@@ -89,11 +89,9 @@ with DAG(
         from extract.openalexco.openalexco_extractor import OpenAlexCOExtractor
 
         params = context["params"]
-        hook = MongoHook(conn_id=params["mongo_conn_id"])
+        hook = MongoHook(mongo_conn_id=params["mongo_conn_id"])
         client = hook.get_conn()
-        mongo_uri = hook.uri  # type: ignore[attr-defined]
         return OpenAlexCOExtractor(
-            mongodb_uri=mongo_uri,
             db_in=params["db_in"],
             db_out=params["db_out"],
             es_index=params["es_index"],

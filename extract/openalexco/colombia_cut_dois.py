@@ -110,10 +110,10 @@ def colombia_cut_dois(
     db_out: str,
     jobs: int = 72,
     backend: str = "threading",
-    mongo_uri: str = "mongodb://localhost:27017",
+    client: MongoClient | None = None,
 ) -> None:
     """Collect DOIs from all configured sources and upsert matching works."""
-    c = MongoClient(mongo_uri)
+    c: MongoClient = client if client is not None else MongoClient()
     dois: list[str] = []
 
     # Google Scholar
