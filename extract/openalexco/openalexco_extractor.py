@@ -118,32 +118,31 @@ class OpenAlexCOExtractor(BaseExtractor):
     def _cut_works_by_sources(self) -> None:
         self.logger.info("Step 2: cutting works from Colombian sources …")
         t0 = time.time()
-        self._client[self.db_out]["works"].create_index("id")
 
-        sources_ids = list(
-            self._client[self.db_in]["sources"].find({"country_code": "CO"}, {"id": 1})
-        )
+        source_ids = [
+            s["id"]
+            for s in self._client[self.db_in]["sources"].find(
+                {"country_code": "CO"}, {"id": 1, "_id": 0}
+            )
+            if s.get("id")
+        ]
+        self.logger.info("Step 2: found %d Colombian sources", len(source_ids))
 
-        # MongoClient is thread-safe — reuse self._client across threading workers.
-        client = self._client
-
-        def _get_pub_works(pid: str) -> list[dict]:
-            return list(client[self.db_in]["works"].find({"locations.source.id": pid}))
-
-        pworks = Parallel(n_jobs=self.jobs, verbose=10, backend=self.backend)(
-            delayed(_get_pub_works)(s["id"]) for s in sources_ids
-        )
-        works: list[dict] = []
-        for pw in pworks or []:
-            works.extend(pw)
-
-        def _insert_if_new(work: dict) -> None:
-            if client[self.db_out]["works"].count_documents({"id": work["id"]}) == 0:
-                client[self.db_out]["works"].insert_one(work)
-
-        Parallel(n_jobs=self.jobs, verbose=10, backend=self.backend)(
-            delayed(_insert_if_new)(w) for w in works
-        )
+        # Single server-side pipeline: match works from Colombian sources,
+        # merge into db_out.works keeping already-inserted docs untouched.
+        pipeline = [
+            {"$match": {"locations.source.id": {"$in": source_ids}}},
+            {"$project": {"_id": 0}},
+            {
+                "$merge": {
+                    "into": {"db": self.db_out, "coll": "works"},
+                    "on": "id",
+                    "whenMatched": "keepExisting",
+                    "whenNotMatched": "insert",
+                }
+            },
+        ]
+        self._client[self.db_in]["works"].aggregate(pipeline)
         self.logger.info("Step 2 done in %.1fs", time.time() - t0)
 
     # ------------------------------------------------------------------
