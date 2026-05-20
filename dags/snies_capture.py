@@ -103,7 +103,7 @@ def _make_unique_headers(headers: list[Any]) -> list[str]:
 
 
 def _iter_excel_records(file_path: str, sheet_name: str | None = None) -> list[dict[str, Any]]:
-    from openpyxl import load_workbook
+    from openpyxl import load_workbook  # type: ignore[import-untyped]
 
     workbook = load_workbook(file_path, read_only=True, data_only=True)
     try:
