@@ -9,6 +9,7 @@ sodapy>=2.2.0
 beautifulsoup4>=4.12.3
 lxml>=6.0.2
 cloudscraper>=1.2.71
+awscli>=1.34.0
 git+https://github.com/colav/oxomoc.git@main#egg=oxomoc
 git+https://github.com/colav/Kahi_impactu_utils.git@main#egg=kahi_impactu_utils
 git+https://github.com/colav/mohan.git@main#egg=mohan
