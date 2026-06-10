@@ -23,6 +23,8 @@ from airflow import DAG
 from airflow.providers.mongo.hooks.mongo import MongoHook
 from airflow.providers.standard.operators.python import PythonOperator
 
+from config.notifications import completion_callbacks
+
 log = logging.getLogger(__name__)
 
 
@@ -284,6 +286,7 @@ with DAG(
     tags=["ror", "import"],
     params={"mongo_conn_id": "mongodb_default", "mongo_db": "ror"},
     is_paused_upon_creation=True,
+    **completion_callbacks(),
 ) as dag:
     download_task = PythonOperator(
         task_id="download_ror",

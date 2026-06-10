@@ -10,6 +10,8 @@ from airflow import DAG
 from airflow.providers.mongo.hooks.mongo import MongoHook
 from airflow.providers.standard.operators.python import PythonOperator
 
+from config.notifications import completion_callbacks
+
 CONFIG_PATH = os.path.join(os.path.dirname(__file__), "..", "config", "oxomoc_colombia_config.py")
 
 
@@ -208,7 +210,8 @@ with DAG(
     start_date=datetime(2026, 1, 1),
     catchup=False,
     is_paused_upon_creation=True,
-    params={"mongo_conn_id": "mongodb_default", "mongo_db": "dspace"},
+    params={"mongo_conn_id": "mongodb_default", "mongo_db": "oxomoc_colombia"},
+    **completion_callbacks(),
 ) as dag:
     endpoints = load_config()
 
@@ -237,6 +240,7 @@ with DAG(
                 "mongo_conn_id": "{{ params.mongo_conn_id }}",
                 "mongo_db": "{{ params.mongo_db }}",
             },
+            trigger_rule="all_done",
         )
 
         create_task >> harvest_task

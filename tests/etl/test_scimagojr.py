@@ -22,7 +22,7 @@ if hasattr(_builder_cls, "add_update"):
 
 @pytest.fixture
 def mock_mongo():
-    client = mongomock.MongoClient()
+    client: Any = mongomock.MongoClient()
     return client
 
 
@@ -43,15 +43,18 @@ def test_extractor_initialization(extractor):
     assert extractor.collection is not None
 
 
-@patch("requests.get")
-def test_fetch_year(mock_get, extractor):
+@patch("cloudscraper.create_scraper")
+def test_fetch_year(mock_create_scraper, extractor):
     # Mock CSV response
     csv_content = "Rank;Sourceid;Title;Type;Issn;SJR;SJR Best Quartile;H index;Total Docs. (2023);Total Docs. (3years);Total Refs.;Total Cites (3years);Citable Docs. (3years);Cites / Doc. (2years);Ref. / Doc.;Country;Region;Publisher;Coverage;Categories\n1;12345;Journal of Tests;journal;12345678;1.5;Q1;50;100;300;5000;1000;280;3.5;50.0;Colombia;Latin America;Test Publisher;2020-2023;Test Category"  # noqa E501
 
     mock_response = MagicMock()
     mock_response.status_code = 200
     mock_response.text = csv_content
-    mock_get.return_value = mock_response
+    mock_response.raise_for_status.return_value = None
+    mock_scraper = MagicMock()
+    mock_scraper.get.side_effect = [MagicMock(), mock_response]
+    mock_create_scraper.return_value = mock_scraper
 
     # Test fetching (force redownload to avoid cache issues in tests)
     data = extractor.fetch_year(2023, force_redownload=True)

@@ -229,3 +229,13 @@ airflow.db
 airflow.db-*
 .airflow/
 ror_import/
+openalex_load
+
+# Google Drive credentials — never commit
+*.pickle
+*.pkl
+token.pickle
+
+# Local runtime config / secrets — never commit (keep .env.example tracked)
+.env
+!.env.example
