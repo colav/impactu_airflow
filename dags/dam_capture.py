@@ -17,6 +17,8 @@ from typing import Any
 from airflow import DAG
 from airflow.providers.standard.operators.python import PythonOperator
 
+from config.notifications import completion_callbacks
+
 DEFAULTS = {
     "mongo_conn_id": "mongodb_default",
     "mongo_db": "dam",
@@ -96,6 +98,7 @@ with DAG(
     catchup=False,
     is_paused_upon_creation=True,
     params=DEFAULTS,
+    **completion_callbacks(),
 ) as dag:
     gruplac_groups = PythonOperator(
         task_id="gruplac_groups",

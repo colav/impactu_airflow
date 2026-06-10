@@ -24,6 +24,7 @@ from airflow.providers.standard.operators.python import PythonOperator
 from airflow.providers.standard.operators.trigger_dagrun import TriggerDagRunOperator
 from airflow.sdk import Param
 
+from config.notifications import completion_callbacks
 from extract.openalex.openalex_extractor import DEFAULT_MAX_WORKERS
 
 _DEFAULT_SNAPSHOT_BASE = "/storage/raw_data/openalex"
@@ -74,6 +75,7 @@ with DAG(
     catchup=False,
     max_active_runs=1,
     tags=["openalex", "capture"],
+    **completion_callbacks(),
 ) as dag:
     # ------------------------------------------------------------------
     # Task 1 — S3 sync (BashOperator, idempotent)

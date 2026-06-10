@@ -7,7 +7,6 @@ import re
 import pandas as pd
 from bs4 import BeautifulSoup  # noqa: F401 — kept for upstream compat
 from joblib import Parallel, delayed
-from kahi_impactu_utils.Utils import doi_processor
 from pandas import isna
 from pymongo import MongoClient
 
@@ -83,6 +82,8 @@ def _extract_doi_candidates_from_html(html: str) -> list[str]:
 
 
 def _extract_valid_dois(html: str) -> list[str]:
+    from kahi_impactu_utils.Utils import doi_processor
+
     candidates = _extract_doi_candidates_from_html(html)
     valid: set[str] = set()
     for cand in candidates:
@@ -111,9 +112,14 @@ def colombia_cut_dois(
     jobs: int = 72,
     backend: str = "threading",
     client: MongoClient | None = None,
+    ciarp_files: list[str] | None = None,
 ) -> None:
     """Collect DOIs from all configured sources and upsert matching works."""
+    import os
+
     c: MongoClient = client if client is not None else MongoClient()
+    if ciarp_files is None:
+        ciarp_files = CIARP_FILES
     dois: list[str] = []
 
     # Google Scholar
@@ -161,7 +167,10 @@ def colombia_cut_dois(
                     dois.append(raw_doi["#text"])
 
     # CIARP
-    for ciarp_file in CIARP_FILES:
+    for ciarp_file in ciarp_files:
+        if not os.path.exists(ciarp_file):
+            print(f"WARNING: CIARP file not found, skipping: {ciarp_file}")
+            continue
         df = pd.read_excel(ciarp_file)
         dois.extend(df["doi"].dropna().values.tolist())
 
@@ -180,6 +189,8 @@ def colombia_cut_dois(
     already_set = set(already)
 
     processed: list[str] = []
+    from kahi_impactu_utils.Utils import doi_processor
+
     for raw_doi in dois:
         if raw_doi is not None:
             pdoi = doi_processor(raw_doi)

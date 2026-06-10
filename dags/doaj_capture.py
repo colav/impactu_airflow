@@ -22,6 +22,7 @@ from airflow.providers.standard.operators.python import PythonOperator
 from airflow.sdk import Param
 from pymongo import UpdateOne
 
+from config.notifications import completion_callbacks
 from extract.base_extractor import BaseExtractor
 
 UTC = getattr(datetime, "UTC", timezone(timedelta(0)))
@@ -635,6 +636,7 @@ with DAG(
             description="Override DB semester (1 or 2)",
         ),
     },
+    **completion_callbacks(),
 ) as dag:
     extract_task = PythonOperator(
         task_id="doaj_capture",

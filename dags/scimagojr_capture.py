@@ -9,6 +9,8 @@ from airflow.providers.mongo.hooks.mongo import MongoHook
 from airflow.providers.standard.operators.python import PythonOperator
 from airflow.sdk import Param
 
+from config.notifications import completion_callbacks
+
 # Note: import `ScimagoJRExtractor` inside the task to avoid import-time
 # side-effects when Airflow parses DAGs. This prevents module-level
 # filesystem changes from triggering linter errors during import.
@@ -81,6 +83,7 @@ with DAG(
             1000, type="integer", description="Number of records to insert in each bulk operation"
         ),
     },
+    **completion_callbacks(),
 ) as dag:
     years = list(range(1999, datetime.now().year + 1))
 

@@ -24,6 +24,8 @@ from airflow.providers.mongo.hooks.mongo import MongoHook
 from airflow.providers.standard.operators.python import PythonOperator
 from airflow.sdk import Param
 
+from config.notifications import completion_callbacks
+
 with DAG(
     dag_id="openalexco_capture",
     default_args={
@@ -87,10 +89,16 @@ with DAG(
             type="boolean",
             description="Skip cut_works_authorship step (useful for testing)",
         ),
+        "ciarp_files": Param(
+            ["/storage/kahi_data/kahi_data/staff/formato_CIARP_UDEA_2024_11.xlsx"],
+            type="array",
+            description="List of CIARP Excel file paths (skipped if file not found)",
+        ),
     },
     schedule=None,
     catchup=False,
     tags=["openalexco", "capture"],
+    **completion_callbacks(),
 ) as dag:
     # ------------------------------------------------------------------
     # Helper: build extractor inside the task (avoid parse-time imports)
@@ -110,6 +118,7 @@ with DAG(
             es_uri=params["es_uri"],
             es_auth=(params["es_user"], params["es_password"]),
             client=client,
+            ciarp_files=params.get("ciarp_files", []),
         )
 
     # ------------------------------------------------------------------
