@@ -21,13 +21,15 @@ from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseDownload
 from pymongo import ReplaceOne
 
+from config.env import get_env
+from config.notifications import completion_callbacks
 from extract.base_extractor import BaseExtractor
 
 XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 XLS_MIME = "application/vnd.ms-excel"
 FOLDER_MIME = "application/vnd.google-apps.folder"
 
-CIARP_PREFIX = "ciarp_"
+ORIGINAL_PREFIX = "original"
 CIARP_DATE_FORMATS = ("%d_%m_%Y_%H:%M", "%Y-%m-%d_%H:%M")
 CIARP_NAME_RE = re.compile(
     r"^ciarp_(?P<rorid>[^_]+)_(?P<date>\d{2}_\d{2}_\d{4}_\d{2}:\d{2}|\d{4}-\d{2}-\d{2}_\d{2}:\d{2})(?:_.*)?$",
@@ -228,6 +230,9 @@ class CiarpExtractor(BaseExtractor):
     def _list_ciarp_excels(self, folder_id: str) -> list[dict[str, Any]]:
         """
         List Excel files (xlsx/xls) in a given institution folder.
+
+        Files whose name starts with "ORIGINAL" (case-insensitive) are excluded;
+        all other Excel files are taken.
         """
         q = (
             f"'{folder_id}' in parents and trashed=false and ("
@@ -235,7 +240,7 @@ class CiarpExtractor(BaseExtractor):
             f")"
         )
         files = self._list_files(q=q)
-        return [f for f in files if (f.get("name") or "").lower().startswith(CIARP_PREFIX)]
+        return [f for f in files if not (f.get("name") or "").lower().startswith(ORIGINAL_PREFIX)]
 
     def _resolve_subfolder_id(self, parent_folder_id: str, subfolder_name: str) -> str:
         """
@@ -531,8 +536,10 @@ def run_ciarp_capture(**kwargs: Any) -> None:
             if value not in (None, ""):
                 params[key] = value
 
-    drive_root_folder_id = params.get("drive_root_folder_id") or Variable.get(
-        "ciarp_drive_root_folder_id", default_var=""
+    drive_root_folder_id = (
+        params.get("drive_root_folder_id")
+        or get_env("CIARP_DRIVE_ROOT_FOLDER_ID")
+        or Variable.get("ciarp_drive_root_folder_id", default_var="")
     )
     drive_subfolder_name = params.get("drive_subfolder_name") or Variable.get(
         "ciarp_drive_subfolder_name", default_var="ciarp"
@@ -588,7 +595,8 @@ with DAG(
         "drive_root_folder_id": Param(
             "",
             type="string",
-            description="Google Drive folder ID containing CIARP files",
+            description="Google Drive root folder ID containing CIARP files "
+            "(leave empty to use the 'ciarp_drive_root_folder_id' Airflow Variable)",
         ),
         "drive_subfolder_name": Param(
             "ciarp",
@@ -626,6 +634,7 @@ with DAG(
             description="Create a backup collection before loading if data exists",
         ),
     },
+    **completion_callbacks(),
 ) as dag:
     extract_task = PythonOperator(
         task_id="ciarp_capture",

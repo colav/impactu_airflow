@@ -5,8 +5,8 @@ import os
 import time
 from typing import Any
 
+import cloudscraper
 import pandas as pd
-import requests
 from pymongo import UpdateOne
 
 from extract.base_extractor import BaseExtractor
@@ -116,15 +116,21 @@ class ScimagoJRExtractor(BaseExtractor):
             # If file is missing from cache or force_redownload is True, we download it.
             # We no longer skip download if data exists in MongoDB, to allow for updates/completion.
             params = {"year": str(year), "type": "all", "out": "xls"}
-            headers = {
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
-                "Accept-Language": "en-US,en;q=0.9",
-                "Referer": "https://www.scimagojr.com/journalrank.php",
-            }
             self.logger.info(f"Downloading data for year {year}...")
 
-            response = requests.get(self.base_url, params=params, headers=headers)
+            scraper = cloudscraper.create_scraper(
+                browser={"browser": "chrome", "platform": "linux", "desktop": True}
+            )
+            # Warm-up request: establishes Cloudflare session cookies.
+            # The warm-up itself may return 403, but that's expected.
+            scraper.get(self.base_url, params={"year": str(year)}, timeout=30)
+            time.sleep(3)
+            response = scraper.get(
+                self.base_url,
+                params=params,
+                headers={"Referer": f"{self.base_url}?year={year}"},
+                timeout=60,
+            )
             response.raise_for_status()
             content = response.text
 

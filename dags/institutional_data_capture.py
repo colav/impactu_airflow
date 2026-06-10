@@ -4,6 +4,8 @@ from airflow import DAG
 from airflow.providers.standard.operators.trigger_dagrun import TriggerDagRunOperator
 from airflow.sdk import Param
 
+from config.notifications import completion_callbacks
+
 default_args = {
     "owner": "impactu",
     "depends_on_past": False,
@@ -32,7 +34,8 @@ with DAG(
         "drive_root_folder_id": Param(
             "",
             type="string",
-            description="Google Drive root folder ID containing staff/ciarp subfolders",
+            description="Google Drive root folder ID containing staff/ciarp subfolders "
+            "(leave empty to use the staff_/ciarp_drive_root_folder_id Airflow Variables)",
         ),
         "staff_drive_subfolder_name": Param(
             "staff",
@@ -75,6 +78,7 @@ with DAG(
             description="Create a backup collection before loading if data exists (CIARP)",
         ),
     },
+    **completion_callbacks(),
 ) as dag:
     trigger_staff_capture = TriggerDagRunOperator(
         task_id="trigger_staff_capture",

@@ -29,6 +29,8 @@ from airflow import DAG
 from airflow.providers.mongo.hooks.mongo import MongoHook
 from airflow.providers.standard.operators.python import PythonOperator
 
+from config.notifications import completion_callbacks
+
 DEFAULTS = {
     "mongo_conn_id": "mongodb_default",
     "mongo_db": "publindex",
@@ -313,6 +315,7 @@ with DAG(
     catchup=False,
     is_paused_upon_creation=True,
     params=DEFAULTS,
+    **completion_callbacks(),
 ) as dag:
     t_national = PythonOperator(
         task_id="download_publindex_national",

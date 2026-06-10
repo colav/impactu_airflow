@@ -4,9 +4,12 @@ import os
 from datetime import datetime, timedelta
 
 from airflow import DAG
+from airflow.models.baseoperator import chain
 from airflow.providers.mongo.hooks.mongo import MongoHook
 from airflow.providers.standard.operators.python import PythonOperator
 from airflow.sdk import Param
+
+from config.notifications import completion_callbacks
 
 # Note: import `ScimagoJRExtractor` inside the task to avoid import-time
 # side-effects when Airflow parses DAGs. This prevents module-level
@@ -50,9 +53,8 @@ def run_extraction_by_year(
     # Import extractor here to avoid module-level import side-effects
     from extract.scimagojr.scimagojr_extractor import ScimagoJRExtractor
 
-    # Use AIRFLOW_HOME for cache directory to avoid writing to /opt/airflow
-    airflow_home = os.environ.get("AIRFLOW_HOME", os.getcwd())
-    cache_dir = os.path.join(airflow_home, "cache", "scimagojr")
+    # Use /tmp for cache to avoid permission issues with /opt/airflow
+    cache_dir = os.path.join("/tmp", "scimagojr_cache")
     extractor = ScimagoJRExtractor("", mongo_db, client=client, cache_dir=cache_dir)
     try:
         extractor.process_year(year, force_redownload=force_redownload, chunk_size=chunk_size)
@@ -81,19 +83,21 @@ with DAG(
             1000, type="integer", description="Number of records to insert in each bulk operation"
         ),
     },
+    **completion_callbacks(),
 ) as dag:
     years = list(range(1999, datetime.now().year + 1))
 
-    extract_task = PythonOperator.partial(
-        task_id="extract_and_load_scimagojr",
-        python_callable=run_extraction_by_year,
-    ).expand(
-        op_kwargs=[
-            {
+    tasks = [
+        PythonOperator(
+            task_id=f"extract_year_{year}",
+            python_callable=run_extraction_by_year,
+            op_kwargs={
                 "year": year,
                 "mongo_conn_id": "{{ params.mongo_conn_id }}",
                 "mongo_db": "{{ params.mongo_db }}",
-            }
-            for year in years
-        ]
-    )
+            },
+        )
+        for year in years
+    ]
+
+    chain(*tasks)

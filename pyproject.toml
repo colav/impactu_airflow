@@ -21,6 +21,8 @@ dependencies = [
     "openpyxl>=3.1.2",
     "requests>=2.32.5",
     "oxomoc @ git+https://github.com/colav/oxomoc.git@main",
+    "kahi_impactu_utils @ git+https://github.com/colav/Kahi_impactu_utils.git@main",
+    "mohan @ git+https://github.com/colav/mohan.git@main",
 ]
 
 [build-system]
@@ -78,9 +80,15 @@ module = [
     "googleapiclient.*",
     "urllib3.*",
     "pandas.*",
+    "bs4.*",
+    "cloudscraper.*",
+    "joblib.*",
+    "kahi_impactu_utils.*",
+    "mohan.*",
     "pymongo.*",
     "requests.*",
     "oxomoc.*",
+    "thefuzz.*",
     "yuku.*",
     "lxml.*",
     "pytest.*",

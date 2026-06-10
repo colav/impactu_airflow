@@ -21,11 +21,14 @@ from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseDownload
 from pymongo import ReplaceOne
 
+from config.env import get_env
+from config.notifications import completion_callbacks
 from extract.base_extractor import BaseExtractor
 
 FOLDER_MIME = "application/vnd.google-apps.folder"
 XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 XLS_MIME = "application/vnd.ms-excel"
+ORIGINAL_PREFIX = "original"
 
 
 class StaffExtractor(BaseExtractor):
@@ -196,7 +199,8 @@ class StaffExtractor(BaseExtractor):
         """
         list Excel files (xlsx/xls) in a given institution folder.
 
-        If any file names start with "staff_", prefer those.
+        Files whose name starts with "ORIGINAL" (case-insensitive) are excluded;
+        all other Excel files are taken.
         """
         q = (
             f"'{folder_id}' in parents and trashed=false and ("
@@ -205,9 +209,7 @@ class StaffExtractor(BaseExtractor):
         )
         files = self._list_files(q=q)
 
-        # (Optional) prioritize those named staff_...
-        staff_like = [f for f in files if (f.get("name") or "").lower().startswith("staff_")]
-        return staff_like if staff_like else files
+        return [f for f in files if not (f.get("name") or "").lower().startswith(ORIGINAL_PREFIX)]
 
     @staticmethod
     def _pick_latest_by_modified_time(files: list[dict[str, Any]]) -> dict[str, Any] | None:
@@ -456,8 +458,10 @@ def run_staff_capture(**kwargs: Any) -> None:
             if value not in (None, ""):
                 params[key] = value
 
-    drive_root_folder_id = params.get("drive_root_folder_id") or Variable.get(
-        "staff_drive_root_folder_id", default_var=""
+    drive_root_folder_id = (
+        params.get("drive_root_folder_id")
+        or get_env("STAFF_DRIVE_ROOT_FOLDER_ID")
+        or Variable.get("staff_drive_root_folder_id", default_var="")
     )
     drive_subfolder_name = params.get("drive_subfolder_name") or Variable.get(
         "staff_drive_subfolder_name", default_var="staff"
@@ -513,7 +517,8 @@ with DAG(
         "drive_root_folder_id": Param(
             "",
             type="string",
-            description="Google Drive root folder ID containing institution subfolders",
+            description="Google Drive root folder ID containing institution subfolders "
+            "(leave empty to use the 'staff_drive_root_folder_id' Airflow Variable)",
         ),
         "drive_subfolder_name": Param(
             "staff",
@@ -546,6 +551,7 @@ with DAG(
             description="Delete previous docs for each institution before loading the latest file",
         ),
     },
+    **completion_callbacks(),
 ) as dag:
     extract_task = PythonOperator(
         task_id="staff_capture",
