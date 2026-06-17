@@ -2,6 +2,7 @@ import importlib
 import sys
 import types
 from pathlib import Path
+from typing import Any, cast
 
 import pytest
 import yaml
@@ -44,21 +45,21 @@ class _DummyMongoHook:
 
 def _install_airflow_stubs() -> None:
     airflow = types.ModuleType("airflow")
-    airflow.DAG = _DummyDAG
+    cast(Any, airflow).DAG = _DummyDAG
 
     providers = types.ModuleType("airflow.providers")
     mongo_pkg = types.ModuleType("airflow.providers.mongo")
     mongo_hooks_pkg = types.ModuleType("airflow.providers.mongo.hooks")
     mongo_module = types.ModuleType("airflow.providers.mongo.hooks.mongo")
-    mongo_module.MongoHook = _DummyMongoHook
+    cast(Any, mongo_module).MongoHook = _DummyMongoHook
 
     standard_pkg = types.ModuleType("airflow.providers.standard")
     operators_pkg = types.ModuleType("airflow.providers.standard.operators")
     python_module = types.ModuleType("airflow.providers.standard.operators.python")
-    python_module.PythonOperator = _DummyPythonOperator
+    cast(Any, python_module).PythonOperator = _DummyPythonOperator
 
     sdk_module = types.ModuleType("airflow.sdk")
-    sdk_module.Param = _DummyParam
+    cast(Any, sdk_module).Param = _DummyParam
 
     sys.modules["airflow"] = airflow
     sys.modules["airflow.providers"] = providers

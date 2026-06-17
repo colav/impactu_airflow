@@ -7,7 +7,7 @@ import shutil
 import subprocess
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any
+from typing import Any, TypeAlias, cast
 
 import pandas as pd
 import yaml
@@ -16,9 +16,11 @@ from airflow.providers.standard.operators.python import PythonOperator
 from airflow.sdk import Param
 
 try:
-    from airflow.providers.mongo.hooks.mongo import MongoHook
+    from airflow.providers.mongo.hooks import mongo as mongo_hook_module
 except ModuleNotFoundError:
-    MongoHook = None
+    MongoHook: Any = None
+else:
+    MongoHook = cast(Any, mongo_hook_module.MongoHook)
 
 PLUGIN_PARAM_MAP: list[tuple[str, str]] = [
     ("run_ror_affiliations", "ror_affiliations"),
@@ -43,6 +45,9 @@ PLUGIN_PARAM_MAP: list[tuple[str, str]] = [
     ("run_scholar_works", "scholar_works"),
     ("run_minciencias_opendata_works", "minciencias_opendata_works"),
 ]
+
+Identifiers: TypeAlias = dict[str, list[str] | str]
+MongoClientType: TypeAlias = Any
 
 PLUGIN_ORDER = [plugin for _, plugin in PLUGIN_PARAM_MAP]
 WORK_PLUGINS = {
@@ -176,6 +181,18 @@ def _to_list(value: Any) -> list[str]:
     return [str(token).strip() for token in tokens if str(token).strip()]
 
 
+def _id_list(identifiers: Identifiers, key: str) -> list[str]:
+    value = identifiers.get(key, [])
+    if isinstance(value, list):
+        return value
+    return [value] if value else []
+
+
+def _id_text(identifiers: Identifiers, key: str) -> str:
+    value = identifiers.get(key, "")
+    return value if isinstance(value, str) else ""
+
+
 def _resolve_pymongo():
     try:
         from pymongo import MongoClient, ReplaceOne
@@ -191,12 +208,16 @@ def _resolve_mongo_uri(mongo_uri_override: str, mongo_conn_id: str) -> str:
     uri = (mongo_uri_override or "").strip()
     if uri:
         return uri
+    return _mongo_hook_uri(mongo_conn_id)
+
+
+def _mongo_hook_uri(mongo_conn_id: str) -> str:
     if MongoHook is None:
         raise ValueError(
             "Mongo provider is not available in this Airflow image. "
             "Set mongo_uri_override (e.g., mongodb://host:27017)."
         )
-    return MongoHook(mongo_conn_id=mongo_conn_id).get_uri()
+    return str(cast(Any, MongoHook)(mongo_conn_id=mongo_conn_id).get_uri())
 
 
 def _parse_thresholds(value: Any) -> list[int]:
@@ -398,7 +419,7 @@ def _select_plugins(params: dict[str, Any]) -> list[str]:
     return [plugin for plugin in PLUGIN_ORDER if plugin in selected]
 
 
-def _build_identifiers(params: dict[str, Any]) -> dict[str, list[str] | str]:
+def _build_identifiers(params: dict[str, Any]) -> Identifiers:
     author_openalex_ids = [
         _normalize_openalex_id(item, "A") for item in _to_list(params.get("author_openalex", ""))
     ]
@@ -491,7 +512,7 @@ def _create_ciarp_sample(
     ciarp_source_file: str,
     output_file: Path,
     target_type: str,
-    identifiers: dict[str, list[str] | str],
+    identifiers: Identifiers,
 ) -> int:
     if not ciarp_source_file:
         return 0
@@ -500,12 +521,12 @@ def _create_ciarp_sample(
     filtered = frame
 
     cedulas = set(
-        identifiers.get("author_cedula", [])
-        + identifiers.get("work_author_cedula", [])
-        + identifiers.get("work_ciarp_cedula", [])
+        _id_list(identifiers, "author_cedula")
+        + _id_list(identifiers, "work_author_cedula")
+        + _id_list(identifiers, "work_ciarp_cedula")
     )
-    doi_set = set(identifiers.get("work_doi", []))
-    normalized_titles = {_normalize_title(str(identifiers.get("work_title", "")))} - {""}
+    doi_set = set(_id_list(identifiers, "work_doi"))
+    normalized_titles = {_normalize_title(_id_text(identifiers, "work_title"))} - {""}
 
     if target_type == "author" and cedulas:
         filtered = frame[frame["identificación"].astype(str).isin(cedulas)].copy()
@@ -531,7 +552,7 @@ def _build_openalex_sample(
     sample_db_name: str,
     target_type: str,
     affiliation_ror: str,
-    identifiers: dict[str, list[str] | str],
+    identifiers: Identifiers,
     max_records: int,
 ) -> dict[str, Any]:
     source_db = client[source_db_name]
@@ -556,10 +577,10 @@ def _build_openalex_sample(
     related_ids: dict[str, set[str]] = {
         collection_name: set() for collection_name in related_collection_names
     }
+    work_dois = _id_list(identifiers, "work_doi")
 
     if target_type == "work":
-        work_openalex_ids = identifiers.get("work_openalex", [])
-        work_dois = identifiers.get("work_doi", [])
+        work_openalex_ids = _id_list(identifiers, "work_openalex")
         seen_work_ids: set[Any] = set()
         if work_openalex_ids:
             for work in works_collection.find({"id": {"$in": work_openalex_ids}}).limit(
@@ -577,12 +598,11 @@ def _build_openalex_sample(
         if not works and work_dois:
             works = list(works_collection.find({"ids.doi": {"$in": work_dois}}).limit(max_records))
     else:
-        author_ids = set(identifiers.get("author_openalex", []))
-        if has_authors and identifiers.get("author_orcid", []):
+        author_ids = set(_id_list(identifiers, "author_openalex"))
+        author_orcids = _id_list(identifiers, "author_orcid")
+        if has_authors and author_orcids:
             orcid_docs = list(
-                source_db["authors"].find(
-                    {"ids.orcid": {"$in": identifiers.get("author_orcid", [])}}, {"id": 1}
-                )
+                source_db["authors"].find({"ids.orcid": {"$in": author_orcids}}, {"id": 1})
             )
             for doc in orcid_docs:
                 if doc.get("id"):
@@ -594,14 +614,10 @@ def _build_openalex_sample(
                     max_records
                 )
             )
-        elif identifiers.get("work_doi", []):
-            works = list(
-                works_collection.find({"doi": {"$in": identifiers.get("work_doi", [])}}).limit(
-                    max_records
-                )
-            )
+        elif work_dois:
+            works = list(works_collection.find({"doi": {"$in": work_dois}}).limit(max_records))
 
-    author_ids_from_works: set[str] = set(identifiers.get("author_openalex", []))
+    author_ids_from_works: set[str] = set(_id_list(identifiers, "author_openalex"))
     institution_ids_from_works: set[str] = set()
 
     for work in works:
@@ -631,7 +647,10 @@ def _build_openalex_sample(
         authors = list(source_db["authors"].find({"id": {"$in": list(author_ids_from_works)}}))
 
     if has_institutions:
-        institution_clauses = [{"ids.ror": affiliation_ror}, {"ror": affiliation_ror}]
+        institution_clauses: list[dict[str, Any]] = [
+            {"ids.ror": affiliation_ror},
+            {"ror": affiliation_ror},
+        ]
         if institution_ids_from_works:
             institution_clauses.append({"id": {"$in": list(institution_ids_from_works)}})
         institutions = list(source_db["institutions"].find({"$or": institution_clauses}))
@@ -639,7 +658,7 @@ def _build_openalex_sample(
     works_count = _upsert_documents(sample_db["works"], works)
     authors_count = _upsert_documents(sample_db["authors"], authors)
     institutions_count = _upsert_documents(sample_db["institutions"], institutions)
-    related_counts = {}
+    related_counts: dict[str, int] = {}
     for collection_name, ids in related_ids.items():
         if has_related_collections[collection_name] and ids:
             documents = list(source_db[collection_name].find({"id": {"$in": list(ids)}}))
@@ -666,7 +685,7 @@ def _build_scienti_sample(
     source_collection_name: str,
     sample_db_name: str,
     target_type: str,
-    identifiers: dict[str, list[str] | str],
+    identifiers: Identifiers,
     max_records: int,
 ) -> int:
     source_db = client[source_db_name]
@@ -678,14 +697,14 @@ def _build_scienti_sample(
             f"Collection '{source_collection_name}' not found in database '{source_db_name}'"
         )
 
-    clauses = []
+    clauses: list[dict[str, Any]] = []
     if target_type == "author":
-        author_ids = identifiers.get("author_cod_rh", [])
+        author_ids = _id_list(identifiers, "author_cod_rh")
         if author_ids:
             clauses.append({"COD_RH": {"$in": author_ids}})
     else:
-        product_ids = identifiers.get("work_scienti_cod_producto", [])
-        work_cod_rh = identifiers.get("work_scienti_cod_rh", [])
+        product_ids = _id_list(identifiers, "work_scienti_cod_producto")
+        work_cod_rh = _id_list(identifiers, "work_scienti_cod_rh")
         if product_ids and work_cod_rh:
             clauses.append(
                 {
@@ -703,7 +722,7 @@ def _build_scienti_sample(
     if not clauses:
         return 0
 
-    query = {"$or": clauses} if len(clauses) > 1 else clauses[0]
+    query: dict[str, Any] = {"$or": clauses} if len(clauses) > 1 else clauses[0]
     documents = list(source_db[source_collection_name].find(query).limit(max_records))
     return _upsert_documents(sample_db["product"], documents)
 
@@ -713,7 +732,7 @@ def _build_scholar_sample(
     source_db_name: str,
     sample_db_name: str,
     target_type: str,
-    identifiers: dict[str, list[str] | str],
+    identifiers: Identifiers,
     max_records: int,
 ) -> int:
     source_db = client[source_db_name]
@@ -724,9 +743,9 @@ def _build_scholar_sample(
     documents: list[dict[str, Any]] = []
 
     if target_type == "author":
-        author_scholar_ids = identifiers.get("author_scholar", [])
+        author_scholar_ids = _id_list(identifiers, "author_scholar")
         if author_scholar_ids:
-            query = {
+            query: dict[str, Any] = {
                 "$expr": {
                     "$gt": [
                         {
@@ -751,9 +770,9 @@ def _build_scholar_sample(
             }
             documents = list(source_collection.find(query).limit(max_records))
     else:
-        clauses = []
-        scholar_cids = identifiers.get("work_scholar_cid", [])
-        work_dois = identifiers.get("work_doi", [])
+        clauses: list[dict[str, Any]] = []
+        scholar_cids = _id_list(identifiers, "work_scholar_cid")
+        work_dois = _id_list(identifiers, "work_doi")
         if scholar_cids:
             clauses.append({"cid": {"$in": scholar_cids}})
         if work_dois:
@@ -769,13 +788,13 @@ def _build_orcid_sample(
     client,
     source_db_name: str,
     sample_db_name: str,
-    identifiers: dict[str, list[str] | str],
+    identifiers: Identifiers,
 ) -> int:
     source_db = client[source_db_name]
     sample_db = client[sample_db_name]
     sample_db.drop_collection("summaries")
 
-    orcids = identifiers.get("author_orcid", [])
+    orcids = _id_list(identifiers, "author_orcid")
     if not orcids:
         return 0
 
@@ -878,7 +897,7 @@ def _build_minciencias_sample(
     source_db_name: str,
     sample_db_name: str,
     target_type: str,
-    identifiers: dict[str, list[str] | str],
+    identifiers: Identifiers,
     max_records: int,
 ) -> dict[str, int]:
     source_db = client[source_db_name]
@@ -896,8 +915,8 @@ def _build_minciencias_sample(
     for collection_name in required_collections:
         sample_db.drop_collection(collection_name)
 
-    person_ids = set(identifiers.get("author_dam_id", []))
-    product_ids = set(identifiers.get("work_dam_id_producto", []))
+    person_ids = set(_id_list(identifiers, "author_dam_id"))
+    product_ids = set(_id_list(identifiers, "work_dam_id_producto"))
 
     production_query = {}
     if target_type == "author" and person_ids:
@@ -970,23 +989,24 @@ def prepare_context(**kwargs: Any) -> dict[str, Any]:
     affiliation_context = _resolve_affiliation_context(params, selected_plugins)
 
     person_id_values = (
-        identifiers["author_cedula"]
-        + identifiers["author_cod_rh"]
-        + identifiers["author_dam_id"]
-        + identifiers["author_orcid"]
-        + identifiers["author_openalex"]
-        + identifiers["author_scholar"]
+        _id_list(identifiers, "author_cedula")
+        + _id_list(identifiers, "author_cod_rh")
+        + _id_list(identifiers, "author_dam_id")
+        + _id_list(identifiers, "author_orcid")
+        + _id_list(identifiers, "author_openalex")
+        + _id_list(identifiers, "author_scholar")
     )
     work_id_values = (
-        identifiers["work_doi"]
-        + identifiers["work_openalex"]
-        + identifiers["work_scienti_cod_producto"]
-        + identifiers["work_dam_id_producto"]
-        + identifiers["work_ciarp_id"]
-        + identifiers["work_scholar_cid"]
+        _id_list(identifiers, "work_doi")
+        + _id_list(identifiers, "work_openalex")
+        + _id_list(identifiers, "work_scienti_cod_producto")
+        + _id_list(identifiers, "work_dam_id_producto")
+        + _id_list(identifiers, "work_ciarp_id")
+        + _id_list(identifiers, "work_scholar_cid")
     )
-    if identifiers["work_title"]:
-        work_id_values.append(str(identifiers["work_title"]))
+    work_title = _id_text(identifiers, "work_title")
+    if work_title:
+        work_id_values.append(work_title)
 
     if target_type == "author" and not person_id_values:
         raise ValueError("For target_type=author, at least one author identifier is required.")
@@ -994,34 +1014,34 @@ def prepare_context(**kwargs: Any) -> dict[str, Any]:
         raise ValueError("For target_type=work, at least one work identifier is required.")
 
     selected_set = set(selected_plugins)
-    has_author_cedula = bool(identifiers.get("author_cedula", []))
-    has_work_author_cedula = bool(identifiers.get("work_author_cedula", []))
+    has_author_cedula = bool(_id_list(identifiers, "author_cedula"))
+    has_work_author_cedula = bool(_id_list(identifiers, "work_author_cedula"))
     has_staff_cedula = (
         has_author_cedula
         or has_work_author_cedula
-        or bool(identifiers.get("work_ciarp_cedula", []))
+        or bool(_id_list(identifiers, "work_ciarp_cedula"))
     )
-    has_author_cod_rh = bool(identifiers.get("author_cod_rh", []))
-    has_author_dam_id = bool(identifiers.get("author_dam_id", []))
-    has_author_openalex = bool(identifiers.get("author_openalex", []))
-    has_author_orcid = bool(identifiers.get("author_orcid", []))
-    has_author_scholar = bool(identifiers.get("author_scholar", []))
-    has_work_openalex = bool(identifiers.get("work_openalex", []))
-    has_work_doi = bool(identifiers.get("work_doi", []))
+    has_author_cod_rh = bool(_id_list(identifiers, "author_cod_rh"))
+    has_author_dam_id = bool(_id_list(identifiers, "author_dam_id"))
+    has_author_openalex = bool(_id_list(identifiers, "author_openalex"))
+    has_author_orcid = bool(_id_list(identifiers, "author_orcid"))
+    has_author_scholar = bool(_id_list(identifiers, "author_scholar"))
+    has_work_openalex = bool(_id_list(identifiers, "work_openalex"))
+    has_work_doi = bool(_id_list(identifiers, "work_doi"))
     has_work_scienti_pair = bool(
-        identifiers.get("work_scienti_cod_rh", [])
-        and identifiers.get("work_scienti_cod_producto", [])
+        _id_list(identifiers, "work_scienti_cod_rh")
+        and _id_list(identifiers, "work_scienti_cod_producto")
     )
-    has_work_scholar_cid = bool(identifiers.get("work_scholar_cid", []))
-    has_work_ciarp_id = bool(identifiers.get("work_ciarp_id", []))
+    has_work_scholar_cid = bool(_id_list(identifiers, "work_scholar_cid"))
+    has_work_ciarp_id = bool(_id_list(identifiers, "work_ciarp_id"))
     has_work_ciarp_selector = bool(
         has_work_ciarp_id
         or has_work_doi
         or has_work_author_cedula
-        or identifiers.get("work_title")
-        or identifiers.get("work_ciarp_cedula", [])
+        or _id_text(identifiers, "work_title")
+        or _id_list(identifiers, "work_ciarp_cedula")
     )
-    has_work_dam_id = bool(identifiers.get("work_dam_id_producto", []))
+    has_work_dam_id = bool(_id_list(identifiers, "work_dam_id_producto"))
 
     if selected_set & LOCAL_FILE_PLUGINS:
         if {"staff_affiliations", "staff_person"} & selected_set and not affiliation_context.get(
@@ -1264,6 +1284,8 @@ def build_samples(**kwargs: Any) -> dict[str, Any]:
         client = mongo_client_cls(context["mongo_uri_override"])
 
     if context["allow_drop_databases"]:
+        if client is None:
+            raise ValueError("Mongo client is required to drop sample databases.")
         drop_databases = _initial_drop_databases(context)
         _validate_safe_database_drop_names(drop_databases)
         for db_name in drop_databases:
@@ -1283,7 +1305,8 @@ def build_samples(**kwargs: Any) -> dict[str, Any]:
             staff_sample_path,
             list(
                 set(
-                    identifiers.get("author_cedula", []) + identifiers.get("work_author_cedula", [])
+                    _id_list(identifiers, "author_cedula")
+                    + _id_list(identifiers, "work_author_cedula")
                 )
             ),
         )
@@ -1394,7 +1417,7 @@ def build_workflow(**kwargs: Any) -> dict[str, Any]:
     if "ror_affiliations" in selected:
         workflow["ror_affiliations"] = {
             "database_url": context["mongo_uri_override"]
-            or MongoHook(mongo_conn_id=context["mongo_conn_id"]).get_uri(),
+            or _mongo_hook_uri(context["mongo_conn_id"]),
             "database_name": sample_dbs["ror"],
             "collection_name": source_db_names["ror_collection"],
             "num_jobs": context["num_jobs"],
@@ -1404,7 +1427,7 @@ def build_workflow(**kwargs: Any) -> dict[str, Any]:
     if "openalex_affiliations" in selected:
         workflow["openalex_affiliations"] = {
             "database_url": context["mongo_uri_override"]
-            or MongoHook(mongo_conn_id=context["mongo_conn_id"]).get_uri(),
+            or _mongo_hook_uri(context["mongo_conn_id"]),
             "database_name": sample_dbs["openalex"],
             "collection_name": "institutions",
             "num_jobs": context["num_jobs"],
@@ -1427,7 +1450,7 @@ def build_workflow(**kwargs: Any) -> dict[str, Any]:
             "databases": [
                 {
                     "database_url": context["mongo_uri_override"]
-                    or MongoHook(mongo_conn_id=context["mongo_conn_id"]).get_uri(),
+                    or _mongo_hook_uri(context["mongo_conn_id"]),
                     "database_name": sample_dbs["scienti"],
                     "collection_name": "product",
                 }
@@ -1438,7 +1461,7 @@ def build_workflow(**kwargs: Any) -> dict[str, Any]:
     if "minciencias_opendata_affiliations" in selected:
         workflow["minciencias_opendata_affiliations"] = {
             "database_url": context["mongo_uri_override"]
-            or MongoHook(mongo_conn_id=context["mongo_conn_id"]).get_uri(),
+            or _mongo_hook_uri(context["mongo_conn_id"]),
             "database_name": sample_dbs["minciencias"],
             "collection_name": "gruplac_groups_data",
             "num_jobs": context["num_jobs"],
@@ -1460,7 +1483,7 @@ def build_workflow(**kwargs: Any) -> dict[str, Any]:
             "databases": [
                 {
                     "database_url": context["mongo_uri_override"]
-                    or MongoHook(mongo_conn_id=context["mongo_conn_id"]).get_uri(),
+                    or _mongo_hook_uri(context["mongo_conn_id"]),
                     "database_name": sample_dbs["scienti"],
                     "collection_name": "product",
                 }
@@ -1471,7 +1494,7 @@ def build_workflow(**kwargs: Any) -> dict[str, Any]:
     if "minciencias_opendata_person" in selected:
         workflow["minciencias_opendata_person"] = {
             "database_url": context["mongo_uri_override"]
-            or MongoHook(mongo_conn_id=context["mongo_conn_id"]).get_uri(),
+            or _mongo_hook_uri(context["mongo_conn_id"]),
             "database_name": sample_dbs["minciencias"],
             "researchers": "cvlac_data",
             "cvlac": "cvlac_stage",
@@ -1485,7 +1508,7 @@ def build_workflow(**kwargs: Any) -> dict[str, Any]:
     if "openalex_person" in selected:
         workflow["openalex_person"] = {
             "database_url": context["mongo_uri_override"]
-            or MongoHook(mongo_conn_id=context["mongo_conn_id"]).get_uri(),
+            or _mongo_hook_uri(context["mongo_conn_id"]),
             "database_name": sample_dbs["openalex"],
             "collection_name": "authors",
             "collection_name_works": "works",
@@ -1496,7 +1519,7 @@ def build_workflow(**kwargs: Any) -> dict[str, Any]:
     if "orcid_person" in selected:
         workflow["orcid_person"] = {
             "database_url": context["mongo_uri_override"]
-            or MongoHook(mongo_conn_id=context["mongo_conn_id"]).get_uri(),
+            or _mongo_hook_uri(context["mongo_conn_id"]),
             "database_name": sample_dbs["orcid"],
             "collection_name": "summaries",
             "num_jobs": context["num_jobs"],
@@ -1506,7 +1529,7 @@ def build_workflow(**kwargs: Any) -> dict[str, Any]:
     if "scholar_person" in selected:
         workflow["scholar_person"] = {
             "database_url": context["mongo_uri_override"]
-            or MongoHook(mongo_conn_id=context["mongo_conn_id"]).get_uri(),
+            or _mongo_hook_uri(context["mongo_conn_id"]),
             "database_name": sample_dbs["scholar"],
             "collection_name": "stage",
             "num_jobs": context["num_jobs"],
@@ -1525,7 +1548,7 @@ def build_workflow(**kwargs: Any) -> dict[str, Any]:
     if "openalex_works/doi" in selected:
         plugin_config = {
             "database_url": context["mongo_uri_override"]
-            or MongoHook(mongo_conn_id=context["mongo_conn_id"]).get_uri(),
+            or _mongo_hook_uri(context["mongo_conn_id"]),
             "database_name": sample_dbs["openalex"],
             "collection_name": "works",
             "num_jobs": context["num_jobs"],
@@ -1539,7 +1562,7 @@ def build_workflow(**kwargs: Any) -> dict[str, Any]:
             "databases": [
                 {
                     "database_url": context["mongo_uri_override"]
-                    or MongoHook(mongo_conn_id=context["mongo_conn_id"]).get_uri(),
+                    or _mongo_hook_uri(context["mongo_conn_id"]),
                     "database_name": sample_dbs["scienti"],
                     "collection_name": "product",
                 }
@@ -1565,7 +1588,7 @@ def build_workflow(**kwargs: Any) -> dict[str, Any]:
     if "scholar_works/doi" in selected:
         plugin_config = {
             "database_url": context["mongo_uri_override"]
-            or MongoHook(mongo_conn_id=context["mongo_conn_id"]).get_uri(),
+            or _mongo_hook_uri(context["mongo_conn_id"]),
             "database_name": sample_dbs["scholar"],
             "collection_name": "stage",
             "num_jobs": context["num_jobs"],
@@ -1577,7 +1600,7 @@ def build_workflow(**kwargs: Any) -> dict[str, Any]:
     if "minciencias_opendata_works" in selected:
         plugin_config = {
             "database_url": context["mongo_uri_override"]
-            or MongoHook(mongo_conn_id=context["mongo_conn_id"]).get_uri(),
+            or _mongo_hook_uri(context["mongo_conn_id"]),
             "database_name": sample_dbs["minciencias"],
             "collection_name": "gruplac_production_data",
             "insert_all": context["minciencias_works_insert_all"],
@@ -1591,7 +1614,7 @@ def build_workflow(**kwargs: Any) -> dict[str, Any]:
     if "openalex_works" in selected:
         plugin_config = {
             "database_url": context["mongo_uri_override"]
-            or MongoHook(mongo_conn_id=context["mongo_conn_id"]).get_uri(),
+            or _mongo_hook_uri(context["mongo_conn_id"]),
             "database_name": sample_dbs["openalex"],
             "collection_name": "works",
             "num_jobs": context["num_jobs"],
@@ -1606,7 +1629,7 @@ def build_workflow(**kwargs: Any) -> dict[str, Any]:
             "databases": [
                 {
                     "database_url": context["mongo_uri_override"]
-                    or MongoHook(mongo_conn_id=context["mongo_conn_id"]).get_uri(),
+                    or _mongo_hook_uri(context["mongo_conn_id"]),
                     "database_name": sample_dbs["scienti"],
                     "collection_name": "product",
                 }
@@ -1634,7 +1657,7 @@ def build_workflow(**kwargs: Any) -> dict[str, Any]:
     if "scholar_works" in selected:
         plugin_config = {
             "database_url": context["mongo_uri_override"]
-            or MongoHook(mongo_conn_id=context["mongo_conn_id"]).get_uri(),
+            or _mongo_hook_uri(context["mongo_conn_id"]),
             "database_name": sample_dbs["scholar"],
             "collection_name": "stage",
             "num_jobs": context["num_jobs"],
@@ -1645,9 +1668,7 @@ def build_workflow(**kwargs: Any) -> dict[str, Any]:
 
     ordered_workflow = {name: workflow[name] for name in PLUGIN_ORDER if name in workflow}
 
-    mongo_uri = (
-        context["mongo_uri_override"] or MongoHook(mongo_conn_id=context["mongo_conn_id"]).get_uri()
-    )
+    mongo_uri = context["mongo_uri_override"] or _mongo_hook_uri(context["mongo_conn_id"])
     workflow_config = {
         "config": {
             "database_url": mongo_uri,
