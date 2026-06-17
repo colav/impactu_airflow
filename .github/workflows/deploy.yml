@@ -72,6 +72,7 @@ jobs:
         run: |
           export PYTHONPATH=$PYTHONPATH:.
           pytest tests/etl/test_dag_integrity.py
+          pytest tests/etl/test_kahi_test_sample.py
 
       - name: Get changed files
         id: changed-files

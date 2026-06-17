@@ -233,9 +233,8 @@ class OpenAlexCOExtractor(BaseExtractor):
         pipeline: list[dict[str, Any]] = [
             {"$project": {"_id": 0, "authorships.author.id": 1}},
             {"$unwind": "$authorships"},
-            {"$group": {"_id": None, "authors": {"$addToSet": "$authorships.author.id"}}},
-            {"$unwind": "$authors"},
-            {"$project": {"_id": 0}},
+            {"$group": {"_id": "$authorships.author.id"}},
+            {"$project": {"_id": 0, "author_id": "$_id"}},
         ]
         authors_ids = list(self._client[self.db_out]["works"].aggregate(pipeline))
 
@@ -247,7 +246,7 @@ class OpenAlexCOExtractor(BaseExtractor):
                 client[self.db_out]["authors"].insert_one(author)
 
         Parallel(n_jobs=self.jobs, verbose=10, backend=self.backend, batch_size=100)(
-            delayed(_save_author)(a["authors"]) for a in authors_ids
+            delayed(_save_author)(a["author_id"]) for a in authors_ids
         )
         self.logger.info("Step 6 done in %.1fs", time.time() - t0)
 
