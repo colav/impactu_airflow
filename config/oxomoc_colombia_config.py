@@ -1382,7 +1382,9 @@ endpoints["dspace_unimagdalena"] = {}
 endpoints["dspace_unimagdalena"]["enabled"] = True
 endpoints["dspace_unimagdalena"]["name"] = "UNIVERSIDAD DEL MAGDALENA - UNIMAGDALENA"
 endpoints["dspace_unimagdalena"]["ror"] = "https://ror.org/038mvjn28"
-endpoints["dspace_unimagdalena"]["url"] = ("https://repositorio.unimagdalena.edu.co/server/oai/request")
+endpoints["dspace_unimagdalena"]["url"] = (
+    "https://repositorio.unimagdalena.edu.co/server/oai/request"
+)
 endpoints["dspace_unimagdalena"]["metadataPrefix"] = "dim"
 endpoints["dspace_unimagdalena"]["rate_limit"] = {"calls": 10000, "secs": 1}
 endpoints["dspace_unimagdalena"]["checkpoint"] = {}
