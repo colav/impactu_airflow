@@ -7,7 +7,7 @@ import shutil
 import subprocess
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any, TypeAlias, cast
+from typing import Any, cast
 
 import pandas as pd
 import yaml
@@ -46,8 +46,8 @@ PLUGIN_PARAM_MAP: list[tuple[str, str]] = [
     ("run_minciencias_opendata_works", "minciencias_opendata_works"),
 ]
 
-Identifiers: TypeAlias = dict[str, list[str] | str]
-MongoClientType: TypeAlias = Any
+type Identifiers = dict[str, list[str] | str]
+type MongoClientType = Any
 
 PLUGIN_ORDER = [plugin for _, plugin in PLUGIN_PARAM_MAP]
 WORK_PLUGINS = {
