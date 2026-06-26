@@ -90,9 +90,19 @@ with DAG(
             description="Skip cut_works_authorship step (useful for testing)",
         ),
         "ciarp_files": Param(
-            ["/storage/kahi_data/kahi_data/staff/formato_CIARP_UDEA_2024_11.xlsx"],
+            [],
             type="array",
-            description="List of CIARP Excel file paths (skipped if file not found)",
+            description="Optional legacy list of CIARP Excel file paths (skipped if file not found)",
+        ),
+        "ciarp_db": Param(
+            "institutional_data",
+            type="string",
+            description="MongoDB database containing normalized CIARP records",
+        ),
+        "ciarp_collection": Param(
+            "ciarp",
+            type="string",
+            description="MongoDB collection containing normalized CIARP records",
         ),
     },
     schedule=None,
@@ -119,6 +129,8 @@ with DAG(
             es_auth=(params["es_user"], params["es_password"]),
             client=client,
             ciarp_files=params.get("ciarp_files", []),
+            ciarp_db=params["ciarp_db"],
+            ciarp_collection=params["ciarp_collection"],
         )
 
     # ------------------------------------------------------------------

@@ -75,6 +75,28 @@ The `.github/workflows/deploy.yml` file manages the lifecycle:
 - **Variables**: Non-sensitive configurations (e.g., `scimagojr_cache_dir`, `staff_cache_dir`, `staff_drive_root_folder_id`, `ciarp_drive_root_folder_id`).
 - **Connections**: Database credentials (MongoDB, Postgres) and APIs. **Never** hardcode credentials in the code.
 
+### Institutional capture runtime defaults
+
+The `institutional_data_capture` DAG is designed to be triggered from the Airflow UI without filling parameters in the common production case. Its DAG params include non-sensitive defaults for:
+
+- Google Drive institutional root folder ID.
+- STAFF/CIARP subfolder names.
+- Container cache paths under `/opt/airflow/cache/institutional`.
+- Container token path: `/opt/airflow/data/secrets/google_token.pickle`.
+
+The Google token pickle must not be baked into the Docker image or committed to this repository. Mount it at runtime instead in the Airflow services that can execute tasks. Example compose snippet:
+
+```yaml
+services:
+  airflow-worker:
+    volumes:
+      - "${GDRIVE_TOKEN_PICKLE_PATH}:/opt/airflow/data/secrets/google_token.pickle:ro"
+```
+
+The real `GDRIVE_TOKEN_PICKLE_PATH` belongs in the deployment `.env` file, which must remain untracked. `.env.example` documents the variable name without exposing a real host path.
+
+For production institutional capture, the Airflow connection `mongodb_default` should point to MongoDB with `schema`/database set to `institutional_data`.
+
 ## 6. Monitoring and Maintenance
 
 - **Logs**: Centralized in `/storage/airflow/data/dev/logs` and `/storage/airflow/data/prod/logs`.
