@@ -22,6 +22,13 @@ from googleapiclient.http import MediaIoBaseDownload
 from pymongo import ReplaceOne
 
 from config.env import get_env
+from config.institutional_capture import (
+    CIARP_DRIVE_ROOT_FOLDER_ID,
+    DEFAULT_CIARP_CACHE_DIR,
+    DEFAULT_DUMP_DIR,
+    DEFAULT_GOOGLE_TOKEN_PICKLE,
+    NO_SUBFOLDER_NAME,
+)
 from config.notifications import completion_callbacks
 from extract.base_extractor import BaseExtractor
 
@@ -539,14 +546,19 @@ def run_ciarp_capture(**kwargs: Any) -> None:
     drive_root_folder_id = (
         params.get("drive_root_folder_id")
         or get_env("CIARP_DRIVE_ROOT_FOLDER_ID")
-        or Variable.get("ciarp_drive_root_folder_id", default_var="")
+        or Variable.get("ciarp_drive_root_folder_id", default_var=CIARP_DRIVE_ROOT_FOLDER_ID)
+        or CIARP_DRIVE_ROOT_FOLDER_ID
     )
-    drive_subfolder_name = params.get("drive_subfolder_name") or Variable.get(
-        "ciarp_drive_subfolder_name", default_var="ciarp"
+    drive_subfolder_name = params.get("drive_subfolder_name")
+    if drive_subfolder_name is None:
+        drive_subfolder_name = Variable.get(
+            "ciarp_drive_subfolder_name", default_var=NO_SUBFOLDER_NAME
+        )
+    dump_dir = params.get("dump_dir") or Variable.get(
+        "ciarp_dump_dir", default_var=DEFAULT_DUMP_DIR
     )
-    dump_dir = params.get("dump_dir") or Variable.get("ciarp_dump_dir", default_var="")
-    google_token_pickle = params.get("google_token_pickle")
-    cache_dir = params.get("cache_dir", "/tmp/impactu_airflow_cache/ciarp")
+    google_token_pickle = params.get("google_token_pickle") or DEFAULT_GOOGLE_TOKEN_PICKLE
+    cache_dir = params.get("cache_dir") or DEFAULT_CIARP_CACHE_DIR
 
     force = _coerce_bool(params.get("force", False))
     keep_only_latest_per_institution = _coerce_bool(
@@ -593,28 +605,28 @@ with DAG(
     tags=["capture", "ciarp"],
     params={
         "drive_root_folder_id": Param(
-            "",
+            CIARP_DRIVE_ROOT_FOLDER_ID,
             type="string",
             description="Google Drive root folder ID containing CIARP files "
-            "(leave empty to use the 'ciarp_drive_root_folder_id' Airflow Variable)",
+            "(override only when running against a different CIARP folder)",
         ),
         "drive_subfolder_name": Param(
-            "ciarp",
+            NO_SUBFOLDER_NAME,
             type="string",
-            description="Optional subfolder name under drive_root_folder_id (e.g., Ciarp)",
+            description="Optional subfolder name under drive_root_folder_id",
         ),
         "dump_dir": Param(
-            "",
+            DEFAULT_DUMP_DIR,
             type="string",
             description="Optional directory for dumping the ciarp collection before load",
         ),
         "google_token_pickle": Param(
-            "",
+            DEFAULT_GOOGLE_TOKEN_PICKLE,
             type="string",
-            description="Path to Google Drive credentials pickle file (read-only access)",
+            description="Container path to Google Drive credentials pickle file",
         ),
         "cache_dir": Param(
-            "/tmp/impactu_airflow_cache/ciarp",
+            DEFAULT_CIARP_CACHE_DIR,
             type="string",
             description="Local cache directory for downloaded CIARP files",
         ),

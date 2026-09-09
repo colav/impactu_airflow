@@ -4,6 +4,15 @@ from airflow import DAG
 from airflow.providers.standard.operators.trigger_dagrun import TriggerDagRunOperator
 from airflow.sdk import Param
 
+from config.institutional_capture import (
+    DEFAULT_CIARP_CACHE_DIR,
+    DEFAULT_CIARP_SUBFOLDER_NAME,
+    DEFAULT_DUMP_DIR,
+    DEFAULT_GOOGLE_TOKEN_PICKLE,
+    DEFAULT_STAFF_CACHE_DIR,
+    DEFAULT_STAFF_SUBFOLDER_NAME,
+    INSTITUTIONAL_DRIVE_ROOT_FOLDER_ID,
+)
 from config.notifications import completion_callbacks
 
 default_args = {
@@ -27,38 +36,38 @@ with DAG(
     tags=["capture", "institutional"],
     params={
         "google_token_pickle": Param(
-            "",
+            DEFAULT_GOOGLE_TOKEN_PICKLE,
             type="string",
-            description="Path to Google Drive credentials pickle file",
+            description="Container path to the mounted Google Drive credentials pickle file",
         ),
         "drive_root_folder_id": Param(
-            "",
+            INSTITUTIONAL_DRIVE_ROOT_FOLDER_ID,
             type="string",
             description="Google Drive root folder ID containing staff/ciarp subfolders "
-            "(leave empty to use the staff_/ciarp_drive_root_folder_id Airflow Variables)",
+            "(override only when running against a different Drive tree)",
         ),
         "staff_drive_subfolder_name": Param(
-            "staff",
+            DEFAULT_STAFF_SUBFOLDER_NAME,
             type="string",
             description="Optional subfolder name under staff root (e.g., Staff)",
         ),
         "ciarp_drive_subfolder_name": Param(
-            "ciarp",
+            DEFAULT_CIARP_SUBFOLDER_NAME,
             type="string",
             description="Optional subfolder name under CIARP root (e.g., Ciarp)",
         ),
         "staff_cache_dir": Param(
-            "/tmp/impactu_airflow_cache/staff",
+            DEFAULT_STAFF_CACHE_DIR,
             type="string",
             description="Local cache directory for STAFF downloads",
         ),
         "ciarp_cache_dir": Param(
-            "/tmp/impactu_airflow_cache/ciarp",
+            DEFAULT_CIARP_CACHE_DIR,
             type="string",
             description="Local cache directory for CIARP downloads",
         ),
         "dump_dir": Param(
-            "/tmp/impactu_airflow_cache/dumps",
+            DEFAULT_DUMP_DIR,
             type="string",
             description="Optional dump directory for STAFF/CIARP collections",
         ),

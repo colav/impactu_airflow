@@ -64,8 +64,10 @@ DSPACE_PIPELINE: list[dict[str, Any]] = [
     }
 ]
 
-# CIARP files
-CIARP_FILES: list[str] = ["/storage/kahi_data/kahi_data/staff/formato_CIARP_UDEA_2024_11.xlsx"]
+# CIARP
+CIARP_FILES: list[str] = []
+CIARP_DB = "institutional_data"
+CIARP_COLLECTION = "ciarp"
 
 # DAM
 DB_DAM = "yuku_2025_2"
@@ -102,6 +104,27 @@ def _process_doi(client: MongoClient, doi: str, db_in: str, db_out: str) -> None
             client[db_out]["works"].insert_one(work)
 
 
+def _extend_dois_from_ciarp_collection(
+    client: MongoClient,
+    dois: list[str],
+    ciarp_db: str,
+    ciarp_collection: str,
+) -> None:
+    collection = client[ciarp_db][ciarp_collection]
+    collection.create_index("doi", background=True)
+    cursor = collection.find(
+        {"doi": {"$exists": True, "$nin": [None, ""]}},
+        {"doi": 1, "_id": 0},
+    )
+    count = 0
+    for doc in cursor:
+        doi = doc.get("doi")
+        if doi:
+            dois.append(str(doi))
+            count += 1
+    print(f"INFO: CIARP dois found in {ciarp_db}.{ciarp_collection} = {count}")
+
+
 # ---------------------------------------------------------------------------
 # Public entry point
 # ---------------------------------------------------------------------------
@@ -114,6 +137,8 @@ def colombia_cut_dois(
     backend: str = "threading",
     client: MongoClient | None = None,
     ciarp_files: list[str] | None = None,
+    ciarp_db: str = CIARP_DB,
+    ciarp_collection: str = CIARP_COLLECTION,
 ) -> None:
     """Collect DOIs from all configured sources and upsert matching works."""
     import os
@@ -167,7 +192,10 @@ def colombia_cut_dois(
                 if raw_doi and "#text" in raw_doi:
                     dois.append(raw_doi["#text"])
 
-    # CIARP
+    # CIARP from normalized MongoDB capture
+    _extend_dois_from_ciarp_collection(c, dois, ciarp_db, ciarp_collection)
+
+    # Legacy CIARP Excel files
     for ciarp_file in ciarp_files:
         if not os.path.exists(ciarp_file):
             print(f"WARNING: CIARP file not found, skipping: {ciarp_file}")

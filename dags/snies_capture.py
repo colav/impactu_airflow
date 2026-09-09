@@ -6,6 +6,7 @@ import logging
 import os
 import re
 from datetime import datetime, timedelta
+from html import unescape
 from pathlib import Path
 from typing import Any
 
@@ -40,6 +41,37 @@ def _extract_viewstate(html: str) -> str:
     return match.group(1)
 
 
+def _extract_attr(attrs: str, attr_name: str) -> str | None:
+    match = re.search(rf'\b{re.escape(attr_name)}="([^"]+)"', attrs, re.IGNORECASE)
+    return unescape(match.group(1)) if match else None
+
+
+def _strip_html(value: str) -> str:
+    return re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", value)).strip()
+
+
+def _extract_institutions_download_control(html: str) -> tuple[str, str]:
+    for match in re.finditer(
+        r"<button\b(?P<attrs>[^>]*)>(?P<body>.*?)</button>", html, re.I | re.S
+    ):
+        button_text = _strip_html(unescape(match.group("body"))).casefold()
+        if "descargar instituciones" not in button_text:
+            continue
+
+        attrs = match.group("attrs")
+        control_name = _extract_attr(attrs, "name") or _extract_attr(attrs, "id")
+        if not control_name:
+            raise RuntimeError("Found HECAA institutions download button without name/id")
+
+        form_name = control_name.split(":", maxsplit=1)[0]
+        if form_name == control_name:
+            raise RuntimeError(f"Unexpected HECAA download control id: {control_name!r}")
+
+        return form_name, control_name
+
+    raise RuntimeError("Could not find HECAA institutions download button")
+
+
 def _download_institutions_excel(cache_dir: str, timeout: int = 60) -> str:
     log = logging.getLogger(__name__)
     Path(cache_dir).mkdir(parents=True, exist_ok=True)
@@ -51,10 +83,12 @@ def _download_institutions_excel(cache_dir: str, timeout: int = 60) -> str:
     page_response = session.get(SNIES_IES_URL, timeout=timeout)
     page_response.raise_for_status()
     viewstate = _extract_viewstate(page_response.text)
+    form_name, download_control = _extract_institutions_download_control(page_response.text)
+    log.info("Using HECAA institutions download control %s", download_control)
 
     payload = {
-        "j_idt92": "j_idt92",
-        "j_idt92:j_idt94": "",
+        form_name: form_name,
+        download_control: "",
         "javax.faces.ViewState": viewstate,
     }
     headers = {

@@ -79,6 +79,7 @@ module = [
     "google.*",
     "googleapiclient.*",
     "urllib3.*",
+    "yaml.*",
     "pandas.*",
     "bs4.*",
     "cloudscraper.*",

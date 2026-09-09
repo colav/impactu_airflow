@@ -73,6 +73,8 @@ class OpenAlexCOExtractor(BaseExtractor):
         client: Any = None,
         mongodb_uri: str = "",
         ciarp_files: list[str] | None = None,
+        ciarp_db: str = "institutional_data",
+        ciarp_collection: str = "ciarp",
     ) -> None:
         # BaseExtractor expects (uri, db_name, collection_name) — use db_out as primary db.
         super().__init__(mongodb_uri, db_out, collection_name="works", client=client)
@@ -84,6 +86,8 @@ class OpenAlexCOExtractor(BaseExtractor):
         self.es_uri = es_uri
         self.es_auth = es_auth
         self.ciarp_files: list[str] = ciarp_files if ciarp_files is not None else []
+        self.ciarp_db = ciarp_db
+        self.ciarp_collection = ciarp_collection
         # Raw MongoClient for multi-db access
         self._client: MongoClient = self.client  # type: ignore[assignment]
         self.create_indexes()
@@ -185,6 +189,8 @@ class OpenAlexCOExtractor(BaseExtractor):
             backend=self.backend,
             client=self._client,
             ciarp_files=self.ciarp_files,
+            ciarp_db=self.ciarp_db,
+            ciarp_collection=self.ciarp_collection,
         )
         self.logger.info("Step 3 done in %.1fs", time.time() - t0)
 
@@ -233,9 +239,8 @@ class OpenAlexCOExtractor(BaseExtractor):
         pipeline: list[dict[str, Any]] = [
             {"$project": {"_id": 0, "authorships.author.id": 1}},
             {"$unwind": "$authorships"},
-            {"$group": {"_id": None, "authors": {"$addToSet": "$authorships.author.id"}}},
-            {"$unwind": "$authors"},
-            {"$project": {"_id": 0}},
+            {"$group": {"_id": "$authorships.author.id"}},
+            {"$project": {"_id": 0, "author_id": "$_id"}},
         ]
         authors_ids = list(self._client[self.db_out]["works"].aggregate(pipeline))
 
@@ -247,7 +252,7 @@ class OpenAlexCOExtractor(BaseExtractor):
                 client[self.db_out]["authors"].insert_one(author)
 
         Parallel(n_jobs=self.jobs, verbose=10, backend=self.backend, batch_size=100)(
-            delayed(_save_author)(a["authors"]) for a in authors_ids
+            delayed(_save_author)(a["author_id"]) for a in authors_ids
         )
         self.logger.info("Step 6 done in %.1fs", time.time() - t0)
 
