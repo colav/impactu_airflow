@@ -5,13 +5,12 @@ from airflow.providers.standard.operators.trigger_dagrun import TriggerDagRunOpe
 from airflow.sdk import Param
 
 from config.institutional_capture import (
+    CIARP_DRIVE_ROOT_FOLDER_ID,
     DEFAULT_CIARP_CACHE_DIR,
-    DEFAULT_CIARP_SUBFOLDER_NAME,
     DEFAULT_DUMP_DIR,
     DEFAULT_GOOGLE_TOKEN_PICKLE,
     DEFAULT_STAFF_CACHE_DIR,
-    DEFAULT_STAFF_SUBFOLDER_NAME,
-    INSTITUTIONAL_DRIVE_ROOT_FOLDER_ID,
+    STAFF_DRIVE_ROOT_FOLDER_ID,
 )
 from config.notifications import completion_callbacks
 
@@ -40,21 +39,15 @@ with DAG(
             type="string",
             description="Container path to the mounted Google Drive credentials pickle file",
         ),
-        "drive_root_folder_id": Param(
-            INSTITUTIONAL_DRIVE_ROOT_FOLDER_ID,
+        "staff_drive_root_folder_id": Param(
+            STAFF_DRIVE_ROOT_FOLDER_ID,
             type="string",
-            description="Google Drive root folder ID containing staff/ciarp subfolders "
-            "(override only when running against a different Drive tree)",
+            description="Google Drive folder containing STAFF institution folders",
         ),
-        "staff_drive_subfolder_name": Param(
-            DEFAULT_STAFF_SUBFOLDER_NAME,
+        "ciarp_drive_root_folder_id": Param(
+            CIARP_DRIVE_ROOT_FOLDER_ID,
             type="string",
-            description="Optional subfolder name under staff root (e.g., Staff)",
-        ),
-        "ciarp_drive_subfolder_name": Param(
-            DEFAULT_CIARP_SUBFOLDER_NAME,
-            type="string",
-            description="Optional subfolder name under CIARP root (e.g., Ciarp)",
+            description="Google Drive folder containing CIARP institution folders",
         ),
         "staff_cache_dir": Param(
             DEFAULT_STAFF_CACHE_DIR,
@@ -95,8 +88,7 @@ with DAG(
         wait_for_completion=True,
         poke_interval=60,
         conf={
-            "drive_root_folder_id": "{{ params.drive_root_folder_id }}",
-            "drive_subfolder_name": "{{ params.staff_drive_subfolder_name }}",
+            "drive_root_folder_id": "{{ params.staff_drive_root_folder_id }}",
             "dump_dir": "{{ params.dump_dir }}",
             "google_token_pickle": "{{ params.google_token_pickle }}",
             "cache_dir": "{{ params.staff_cache_dir }}",
@@ -111,8 +103,7 @@ with DAG(
         wait_for_completion=True,
         poke_interval=60,
         conf={
-            "drive_root_folder_id": "{{ params.drive_root_folder_id }}",
-            "drive_subfolder_name": "{{ params.ciarp_drive_subfolder_name }}",
+            "drive_root_folder_id": "{{ params.ciarp_drive_root_folder_id }}",
             "dump_dir": "{{ params.dump_dir }}",
             "google_token_pickle": "{{ params.google_token_pickle }}",
             "cache_dir": "{{ params.ciarp_cache_dir }}",
