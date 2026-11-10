@@ -25,6 +25,14 @@ def load_config(path: str = CONFIG_PATH) -> dict:
     return getattr(cfg, "endpoints", {}) or {}
 
 
+def persist_repository_ror(client, mongo_db: str, endpoint_name: str, ror: str | None) -> int:
+    """Persist the configured repository ROR in its Oxomoc identity document."""
+    result = client[mongo_db][f"{endpoint_name}_identity"].update_one(
+        {}, {"$set": {"ror": str(ror or "").strip()}}
+    )
+    return int(result.matched_count)
+
+
 def ensure_oxomoc_import():
     try:
         import oxomoc  # noqa: F401
@@ -192,6 +200,13 @@ def create_checkpoint(
     metadata = cfg.get("metadataPrefix", "oai_dc")
     # Always call the non-selective create signature; selective mode removed.
     ckp.create(cfg["url"], mongo_db, endpoint_name, metadata)
+    if "ror" in cfg and mongo_db:
+        matched = persist_repository_ror(ckp.client, mongo_db, endpoint_name, cfg.get("ror"))
+        if matched == 0:
+            log.warning(
+                "ROR was not persisted because %s_identity does not exist",
+                endpoint_name,
+            )
 
 
 default_args = {
