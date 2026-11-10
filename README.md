@@ -53,6 +53,41 @@ To maintain consistency in the Airflow interface, we follow this convention:
 
 ## ⚙️ Development and Deployment
 
+### ROR capture
+
+`ror_capture` resolves the current ROR release **on every run**, using Zenodo's
+concept record `6347574`. No version-specific record ID or release ZIP is pinned
+in the DAG. The sequence is `resolve_ror` → `download_ror` → `load_ror`.
+
+If Zenodo is unavailable, the resolver consults the concept DOI in DataCite and
+verifies the version-specific DOI and its parent. It then selects **that exact
+version** from the official `ror-community/ror-data` repository, pins the GitHub
+commit, and verifies the Git blob checksum. A download fallback from Zenodo to
+GitHub also retains the original Zenodo checksum. It never substitutes another
+release or disables HTTPS certificate verification.
+
+Every run downloads the resolved ZIP again, verifies its size and checksum, and
+replaces the cached file only after validation. A SHA-256 binds the downloaded
+archive to the load task. Files reside in
+`$AIRFLOW_HOME/cache/ror_import/<resolved_record_id>/`, in the Docker deployment's
+shared cache mount so the download and load tasks can use different workers.
+
+The loader validates the JSON and unique ROR IDs, inserts into a temporary
+collection, archives the previous database under a unique timestamped name, and
+renames the completed collection to `ror.ror_stage`. It reloads even when the
+release has not changed. Runs are serialized (`max_active_runs=1`). Other
+collections remain available. The resolved version, Zenodo record, download URL,
+SHA-256, loaded count and archive name are saved in
+`ror.ror_import_metadata`, document `_id: "current"`.
+
+Reference: [Retrieve ROR data from Zenodo](https://ror.readme.io/docs/zenodo).
+
+Run the focused tests in an Airflow environment with:
+
+```bash
+python -m unittest discover -s tests/etl -p test_ror.py -v
+```
+
 This repository focuses exclusively on DAG logic and ETL processes. The base infrastructure is provided by the **Chia** repository.
 
 For details on the CI/CD strategy, image building, and environment management, see the document:
