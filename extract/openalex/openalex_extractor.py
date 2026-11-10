@@ -15,6 +15,7 @@ from typing import Any
 
 import pymongo
 from pymongo import UpdateOne
+from pymongo.errors import BulkWriteError
 
 from extract.base_extractor import BaseExtractor
 
@@ -65,6 +66,34 @@ class _NoDaemonPool(multiprocessing.pool.Pool):
 _worker_state: dict[str, Any] = {}
 
 
+def _count_bulk_error(exc: Exception, n_ops: int, counts: dict[str, int], source: str) -> None:
+    """Update ``counts`` after a failed ``bulk_write(ordered=False)`` and log the cause.
+
+    With ``ordered=False`` a ``BulkWriteError`` still applies every op except
+    the failing ones, so only ``writeErrors`` are counted as errors. Any other
+    exception (network, timeout) is assumed to have lost the whole batch.
+    """
+    log = logging.getLogger("airflow.task.OpenAlexExtractor")
+    if isinstance(exc, BulkWriteError):
+        details = exc.details
+        write_errors = details.get("writeErrors", [])
+        counts["upserted"] += details.get("nUpserted", 0)
+        counts["modified"] += details.get("nModified", 0)
+        counts["errors"] += len(write_errors)
+        first = write_errors[0] if write_errors else {}
+        log.warning(
+            "[%s] bulk_write: %d/%d ops failed; first: code=%s %s",
+            source,
+            len(write_errors),
+            n_ops,
+            first.get("code"),
+            str(first.get("errmsg", ""))[:300],
+        )
+    else:
+        counts["errors"] += n_ops
+        log.error("[%s] bulk_write failed, batch of %d lost: %r", source, n_ops, exc)
+
+
 def _worker_init(mongodb_uri: str, db_name: str, chunk_size: int) -> None:
     """Open one MongoClient per worker process (called by Pool initializer)."""
     _worker_state["client"] = pymongo.MongoClient(mongodb_uri)
@@ -104,8 +133,8 @@ def _process_file(args: tuple[str, str]) -> dict[str, Any]:
             result = collection.bulk_write(ops, ordered=False)
             counts["upserted"] += len(result.upserted_ids)
             counts["modified"] += result.modified_count
-        except Exception:  # noqa: BLE001
-            counts["errors"] += len(ops)
+        except Exception as exc:  # noqa: BLE001
+            _count_bulk_error(exc, len(ops), counts, gz_file_str)
         finally:
             ops.clear()
 
@@ -181,13 +210,14 @@ class OpenAlexExtractor(BaseExtractor):
 
         <snapshot_dir>/
         └── data/
-            ├── works/
-            │   ├── manifest
-            │   └── updated_date=YYYY-MM-DD/
-            │       ├── part_000.gz
-            │       └── part_001.gz
-            ├── authors/
-            └── ...
+            └── jsonl/        (legacy snapshots: entity dirs directly under data/)
+                ├── works/
+                │   ├── manifest.json
+                │   └── updated_date=YYYY-MM-DD/
+                │       ├── part_0000.gz
+                │       └── part_0001.gz
+                ├── authors/
+                └── ...
 
     Parameters
     ----------
@@ -272,12 +302,19 @@ class OpenAlexExtractor(BaseExtractor):
     # ------------------------------------------------------------------
 
     def _iter_partition_files(self) -> list[Path]:
-        """Return sorted list of ``.gz`` partition files for this entity type."""
-        entity_dir = self.snapshot_dir / "data" / self.entity_type
+        """Return sorted list of ``.gz`` partition files for this entity type.
+
+        Prefers the ``data/jsonl/<entity>`` layout (snapshots since 2026-10)
+        and falls back to the legacy ``data/<entity>`` layout.
+        """
+        entity_dir = self.snapshot_dir / "data" / "jsonl" / self.entity_type
+        if not entity_dir.exists():
+            entity_dir = self.snapshot_dir / "data" / self.entity_type
         if not entity_dir.exists():
             self.logger.warning("Entity directory not found: %s", entity_dir)
             return []
-        return sorted(entity_dir.rglob("*.gz"))
+        # Only NDJSON partitions; skips side files such as works/deleted_ids.csv.gz
+        return sorted(entity_dir.glob("updated_date=*/part_*.gz"))
 
     # ------------------------------------------------------------------
     # Single-partition loader
@@ -337,8 +374,7 @@ class OpenAlexExtractor(BaseExtractor):
             counts["matched"] += result.matched_count
             counts["modified"] += result.modified_count
         except Exception as exc:  # noqa: BLE001
-            self.logger.error("bulk_write failed: %s", exc)
-            counts["errors"] += len(ops)
+            _count_bulk_error(exc, len(ops), counts, self.entity_type)
         finally:
             ops.clear()
 
