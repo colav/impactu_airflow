@@ -57,6 +57,8 @@ class OpenAlexCOExtractor(BaseExtractor):
         Elasticsearch URI.
     es_auth : tuple[str, str]
         Elasticsearch (user, password).
+    minciencias_db : str
+        Database with the DAM ``minciencias_works_*`` collections (steps 3 and 4).
     client : pymongo.MongoClient, optional
         Existing MongoClient (overrides mongodb_uri).
     """
@@ -75,6 +77,7 @@ class OpenAlexCOExtractor(BaseExtractor):
         ciarp_files: list[str] | None = None,
         ciarp_db: str = "institutional_data",
         ciarp_collection: str = "ciarp",
+        minciencias_db: str = "dam",
     ) -> None:
         # BaseExtractor expects (uri, db_name, collection_name) — use db_out as primary db.
         super().__init__(mongodb_uri, db_out, collection_name="works", client=client)
@@ -88,6 +91,7 @@ class OpenAlexCOExtractor(BaseExtractor):
         self.ciarp_files: list[str] = ciarp_files if ciarp_files is not None else []
         self.ciarp_db = ciarp_db
         self.ciarp_collection = ciarp_collection
+        self.minciencias_db = minciencias_db
         # Raw MongoClient for multi-db access
         self._client: MongoClient = self.client  # type: ignore[assignment]
         self.create_indexes()
@@ -191,6 +195,7 @@ class OpenAlexCOExtractor(BaseExtractor):
             ciarp_files=self.ciarp_files,
             ciarp_db=self.ciarp_db,
             ciarp_collection=self.ciarp_collection,
+            minciencias_db=self.minciencias_db,
         )
         self.logger.info("Step 3 done in %.1fs", time.time() - t0)
 
@@ -211,6 +216,7 @@ class OpenAlexCOExtractor(BaseExtractor):
             client=self._client,
             es_uri=self.es_uri,
             es_auth=self.es_auth,
+            minciencias_db=self.minciencias_db,
         )
         self.logger.info("Step 4 done in %.1fs", time.time() - t0)
 

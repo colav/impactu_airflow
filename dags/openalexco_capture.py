@@ -7,8 +7,10 @@ Steps
 -----
 1. ``cut_works_authorship``  — works with Colombian authors/institutions.
 2. ``cut_works_sources``     — works published in Colombian sources.
-3. ``cut_works_dois``        — works matched by DOI across auxiliary DBs.
-4. ``cut_works_minciencias`` — works matched by Minciencias Gruplac similarity.
+3. ``cut_works_dois``        — works matched by DOI across auxiliary DBs, incl. the
+   latest ``dam.minciencias_works_vXX_YYYYMMDD_filtered``.
+4. ``cut_works_minciencias`` — Minciencias products without DOI matched by title
+   similarity (latest ``dam.minciencias_works_vXX_YYYYMMDD``).
 5. ``dedup_works``           — deduplication via aggregate.
 6. ``cut_authors``           — authors referenced by the cut works.
 7. ``copy_aux_collections``  — verbatim copy of concepts, funders, institutions, etc.
@@ -104,6 +106,14 @@ with DAG(
             type="string",
             description="MongoDB collection containing normalized CIARP records",
         ),
+        "minciencias_db": Param(
+            "dam",
+            type="string",
+            description=(
+                "Database with the DAM outputs. Steps 3 and 4 use its latest "
+                "minciencias_works_vXX_YYYYMMDD[_filtered] collections"
+            ),
+        ),
     },
     schedule=None,
     catchup=False,
@@ -131,6 +141,7 @@ with DAG(
             ciarp_files=params.get("ciarp_files", []),
             ciarp_db=params["ciarp_db"],
             ciarp_collection=params["ciarp_collection"],
+            minciencias_db=params["minciencias_db"],
         )
 
     # ------------------------------------------------------------------

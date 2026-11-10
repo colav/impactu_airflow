@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import re
 from typing import Any
 
 import pandas as pd
@@ -10,6 +9,8 @@ from bs4 import BeautifulSoup  # noqa: F401 — kept for upstream compat
 from joblib import Parallel, delayed
 from pandas import isna
 from pymongo import MongoClient
+
+from extract.openalexco.minciencias_source import MINCIENCIAS_DB, latest_minciencias_collection
 
 # ---------------------------------------------------------------------------
 # Source databases — edit these to match your environment
@@ -69,31 +70,26 @@ CIARP_FILES: list[str] = []
 CIARP_DB = "institutional_data"
 CIARP_COLLECTION = "ciarp"
 
-# DAM
-DB_DAM = "yuku_2025_2"
-COL_DAM = "cvlac_stage_raw"
-
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
 
-def _extract_doi_candidates_from_html(html: str) -> list[str]:
-    candidate_pattern = r"10\.\d{3,}/[^\s\"'<]+"
-    return re.findall(candidate_pattern, html, flags=re.IGNORECASE)
-
-
-def _extract_valid_dois(html: str) -> list[str]:
-    from kahi_impactu_utils.Utils import doi_processor
-
-    candidates = _extract_doi_candidates_from_html(html)
-    valid: set[str] = set()
-    for cand in candidates:
-        doi_url = doi_processor(cand)
-        if doi_url:
-            valid.add(doi_url)
-    return list(valid)
+def _dois_from_minciencias(client: MongoClient, db_name: str) -> list[str]:
+    """Return the unique DOIs of the latest ``minciencias_works_vXX_YYYYMMDD_filtered``."""
+    coll_name = latest_minciencias_collection(client[db_name], filtered=True)
+    cursor = client[db_name][coll_name].aggregate(
+        [
+            {"$unwind": "$external_ids"},
+            {"$match": {"external_ids.source": "doi"}},
+            {"$group": {"_id": "$external_ids.id"}},
+        ],
+        allowDiskUse=True,
+    )
+    dois = [doc["_id"] for doc in cursor if isinstance(doc["_id"], str) and doc["_id"]]
+    print(f"INFO: Minciencias DOIs from {db_name}.{coll_name} = {len(dois)}")
+    return dois
 
 
 def _process_doi(client: MongoClient, doi: str, db_in: str, db_out: str) -> None:
@@ -139,6 +135,7 @@ def colombia_cut_dois(
     ciarp_files: list[str] | None = None,
     ciarp_db: str = CIARP_DB,
     ciarp_collection: str = CIARP_COLLECTION,
+    minciencias_db: str = MINCIENCIAS_DB,
 ) -> None:
     """Collect DOIs from all configured sources and upsert matching works."""
     import os
@@ -203,13 +200,8 @@ def colombia_cut_dois(
         df = pd.read_excel(ciarp_file)
         dois.extend(df["doi"].dropna().values.tolist())
 
-    # DAM
-    dam_cursor = c[DB_DAM][COL_DAM].find()
-    raw = Parallel(n_jobs=-1, verbose=10)(
-        delayed(_extract_valid_dois)(item["html"]) for item in dam_cursor
-    )
-    dam_dois = [d for sub in raw for d in sub if d]
-    dois.extend(list(set(dam_dois)))
+    # Minciencias (DAM pipeline): latest *_filtered works collection
+    dois.extend(_dois_from_minciencias(c, minciencias_db))
 
     # Remove already-inserted DOIs
     already = [
