@@ -110,6 +110,9 @@ class WikidataExtractor(BaseExtractor):
         Database with the ROR staging collection (default: "ror")
     ror_collection_name : str, optional
         ROR staging collection (default: "ror_stage")
+    redirects_collection_name : str, optional
+        Collection of ``{"id": requested QID, "redirect": target QID}`` for the
+        ROR ids that Wikidata merged into another item (default: "redirects")
     request_delay : float, optional
         Seconds to wait between API requests (default: 0.5)
     session : requests.Session, optional
@@ -124,17 +127,20 @@ class WikidataExtractor(BaseExtractor):
         client: Any = None,
         ror_db_name: str = "ror",
         ror_collection_name: str = "ror_stage",
+        redirects_collection_name: str = "redirects",
         request_delay: float = 0.5,
         session: requests.Session | None = None,
     ):
         super().__init__(mongodb_uri, db_name, collection_name, client=client)
         self.ror_collection = self.client[ror_db_name][ror_collection_name]
+        self.redirects = self.db[redirects_collection_name]
         self.request_delay = request_delay
         self.session = session or _session()
         self.create_indexes()
 
     def create_indexes(self) -> None:
         """Index ``id``; the pre-existing non-unique index of the dump load is kept."""
+        self.redirects.create_index([("id", 1)], unique=True, name="id_1", background=True)
         if "id_1" in self.collection.index_information():
             return
         self.collection.create_index([("id", 1)], unique=True, name="id_1", background=True)
@@ -194,6 +200,16 @@ class WikidataExtractor(BaseExtractor):
             self.collection.bulk_write(ops, ordered=False)
         return len(ops)
 
+    def store_redirects(self, redirects: dict[str, str]) -> int:
+        """Upsert ``{"id": requested, "redirect": target}`` so Kahi can follow merged items."""
+        ops = [
+            UpdateOne({"id": requested}, {"$set": {"redirect": target}}, upsert=True)
+            for requested, target in redirects.items()
+        ]
+        if ops:
+            self.redirects.bulk_write(ops, ordered=False)
+        return len(ops)
+
     def run(
         self, batch_size: int = MAX_IDS_PER_REQUEST, force: bool = False, **kwargs: Any
     ) -> dict[str, Any]:
@@ -237,7 +253,7 @@ class WikidataExtractor(BaseExtractor):
             stats["requested"] += len(batch)
             stats["stored"] += self.store_entities(result["entities"])
             stats["missing"] += len(result["missing"])
-            stats["redirected"] += len(result["redirects"])
+            stats["redirected"] += self.store_redirects(result["redirects"])
             for requested, target in result["redirects"].items():
                 self.logger.warning(f"{requested} redirects to {target}")
             self.save_checkpoint(ENTITIES_CHECKPOINT, batch[-1])

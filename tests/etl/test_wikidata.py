@@ -144,6 +144,17 @@ def test_missing_and_redirected_entities(mock_mongo):
     assert extractor.collection.count_documents({}) == 2
     assert extractor.collection.find_one({"id": "Q9"}) is not None
     assert extractor.collection.find_one({"id": "Q3"}) is None
+    redirects = list(extractor.redirects.find({}, {"_id": 0}))
+    assert redirects == [{"id": "Q3", "redirect": "Q9"}]
+    assert extractor.redirects.index_information()["id_1"]["unique"] is True
+
+
+def test_redirects_are_idempotent(mock_mongo):
+    session = FakeSession({"Q1": entity("Q1"), "Q9": entity("Q9")}, redirects={"Q3": "Q9"})
+    extractor = make_extractor(mock_mongo, session)
+    extractor.run()
+    extractor.run()
+    assert extractor.redirects.count_documents({}) == 1
 
 
 def test_checkpoint_is_saved_per_batch_and_cleared(mock_mongo):

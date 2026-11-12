@@ -16,5 +16,7 @@ reloading the dump:
 
 Checkpoint `wikidata_entities` stores the last QID processed, so a failed run
 resumes where it stopped; it is cleared when the run finishes. Missing entities
-are counted, redirects are logged with their target (the entity is stored under
-the target id).
+are counted. When Wikidata merged a ROR item into another one, the entity is
+stored under the target id and `wikidata.redirects` gets
+`{"id": <ROR QID>, "redirect": <target QID>}` so `Kahi_wikidata_affiliations`
+can follow it without calling the API.
