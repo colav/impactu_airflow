@@ -8,7 +8,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
 from config.oxomoc_colombia_config import endpoints  # noqa: E402
-from dags.dspace_capture import persist_repository_ror  # noqa: E402
+from dags.dspace_capture import persist_repository_identity, persist_repository_ror  # noqa: E402
 
 
 def test_persist_repository_ror_enriches_identity_document():
@@ -61,3 +61,38 @@ def test_corrected_repository_rors_are_stable():
     assert "dspace_upn" not in endpoints
     for name in ("dspace_ccb", "dspace_car", "dspace_artesaniasdecolombia", "dspace_cinde"):
         assert endpoints[name]["ror"] == ""
+
+
+def test_persist_repository_identity_stores_ror_and_openalex_source():
+    client: Any = mongomock.MongoClient()
+    client.oxomoc_colombia.dspace_areandina_identity.insert_one(
+        {"base_url": "https://digitk.areandina.edu.co"}
+    )
+
+    matched = persist_repository_identity(
+        client,
+        "oxomoc_colombia",
+        "dspace_areandina",
+        {
+            "ror": "https://ror.org/01hb6tn62",
+            "openalex_source": "https://openalex.org/S7407055425",
+            "url": "x",
+        },
+    )
+
+    identity = client.oxomoc_colombia.dspace_areandina_identity.find_one()
+    assert matched == 1
+    assert identity["ror"] == "https://ror.org/01hb6tn62"
+    assert identity["openalex_source"] == "https://openalex.org/S7407055425"
+    assert "url" not in identity
+
+
+def test_configured_openalex_sources_are_openalex_source_ids():
+    configured = {
+        name: cfg["openalex_source"]
+        for name, cfg in endpoints.items()
+        if cfg.get("openalex_source")
+    }
+    assert len(configured) >= 68
+    assert all(value.startswith("https://openalex.org/S") for value in configured.values())
+    assert configured["dspace_areandina"] == "https://openalex.org/S7407055425"
