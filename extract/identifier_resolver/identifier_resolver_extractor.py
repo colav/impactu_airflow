@@ -242,18 +242,22 @@ class IdentifierResolverExtractor(BaseExtractor):
             if response.status_code != 404:
                 response.raise_for_status()
         else:
-            response = self._get(DOI_URL.format(path), accept=CSL_JSON)
-            if response.status_code == 200:
-                try:
-                    item = response.json()
-                except ValueError:
-                    item = None
-                if isinstance(item, dict):
-                    metadata = parse_csl(item)
-                    return {"status": "ok", "agency": agency, "source": "doi.org", **metadata}
-            elif response.status_code not in (404, 406):
-                response.raise_for_status()
-        # Registered, but the agency publishes no metadata for it.
+            # doi.org redirects to the agency's own server, which may not answer at all.
+            # The DOI is registered either way, so that is not a reason to ask again.
+            try:
+                response = self._get(DOI_URL.format(path), accept=CSL_JSON)
+                item = response.json() if response.status_code == 200 else None
+            except (requests.RequestException, ValueError) as error:
+                unavailable = f"metadata unavailable: {type(error).__name__}"
+                return {**self._registered(agency), "detail": unavailable}
+            if isinstance(item, dict):
+                metadata = parse_csl(item)
+                return {"status": "ok", "agency": agency, "source": "doi.org", **metadata}
+        return self._registered(agency)
+
+    @staticmethod
+    def _registered(agency: str) -> dict[str, Any]:
+        """A DOI its agency registered but publishes no metadata for."""
         return {"status": "ok", "agency": agency, "source": None, "type": None, "titles": []}
 
     def resolve_orcid(self, orcid: str) -> dict[str, Any]:

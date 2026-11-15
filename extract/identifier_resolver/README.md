@@ -39,7 +39,10 @@ Every run leaves a summary in `runs`.
 2. On 404, `doi.org/doiRA/{doi}` names the registration agency or says the DOI
    does not exist (`status: not_found`, `detail: "DOI does not exist"`).
 3. DataCite DOIs are read from the DataCite API; the other agencies through
-   doi.org content negotiation (CSL JSON).
+   doi.org content negotiation (CSL JSON). That request ends at the agency's own
+   server: when it publishes no metadata or does not answer, the DOI is closed
+   as registered without metadata (`status: ok`, `source: null`, `type: null`,
+   `detail: "metadata unavailable: ..."`) instead of being retried forever.
 
 ```json
 {

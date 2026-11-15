@@ -169,6 +169,34 @@ def test_other_agencies_use_doi_org_content_negotiation():
     assert resolved["type"] == "article-journal" and resolved["titles"] == ["Un título"]
 
 
+def test_agency_server_that_does_not_answer_closes_the_doi_as_registered():
+    answers = agency("10.11989/jest.1", "ISTIC")
+    extractor, db, session = build(answers, failing=("https://doi.org/10.11989/jest.1",))
+    queue(db.doi, "10.11989/jest.1")
+
+    assert extractor.run(kinds=["doi"]) == {"doi": {"requested": 1, "ok": 1}}
+
+    resolved = db.doi.find_one({"_id": "10.11989/jest.1"})
+    assert resolved["agency"] == "ISTIC" and resolved["source"] is None
+    assert resolved["type"] is None and resolved["titles"] == []
+    assert resolved["detail"] == "metadata unavailable: ConnectionError"
+    before = len(session.requests)
+    assert extractor.run(kinds=["doi"]) == {"doi": {"requested": 0}}
+    assert len(session.requests) == before
+
+
+def test_agency_without_metadata_is_registered():
+    answers = {**agency("10.3233/abc", "mEDRA"), "https://doi.org/10.3233/abc": (406, None)}
+    extractor, db, _ = build(answers)
+    queue(db.doi, "10.3233/abc")
+
+    extractor.run(kinds=["doi"])
+
+    resolved = db.doi.find_one({"_id": "10.3233/abc"})
+    assert resolved["status"] == "ok" and resolved["source"] is None
+    assert "detail" not in resolved
+
+
 def test_failed_requests_stay_in_the_queue_and_are_retried():
     answers = crossref("10.1234/ok", JOURNAL)
     extractor, db, _ = build(answers, failing=("10.1234/down",))
