@@ -5,6 +5,7 @@ import logging
 import os
 import sys
 from datetime import datetime, timedelta
+from typing import Any
 
 from airflow import DAG
 from airflow.providers.mongo.hooks.mongo import MongoHook
@@ -23,6 +24,26 @@ def load_config(path: str = CONFIG_PATH) -> dict:
     cfg = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(cfg)
     return getattr(cfg, "endpoints", {}) or {}
+
+
+IDENTITY_FIELDS = ("ror", "openalex_source")
+
+
+def persist_repository_identity(
+    client, mongo_db: str, endpoint_name: str, cfg: dict[str, Any]
+) -> int:
+    """Persist the configured repository metadata (ROR, OpenAlex source) in its
+    Oxomoc identity document; Kahi reads it from there."""
+    values = {field: str(cfg.get(field) or "").strip() for field in IDENTITY_FIELDS if field in cfg}
+    if not values:
+        return 0
+    result = client[mongo_db][f"{endpoint_name}_identity"].update_one({}, {"$set": values})
+    return int(result.matched_count)
+
+
+def persist_repository_ror(client, mongo_db: str, endpoint_name: str, ror: str | None) -> int:
+    """Persist the configured repository ROR in its Oxomoc identity document."""
+    return persist_repository_identity(client, mongo_db, endpoint_name, {"ror": ror})
 
 
 def ensure_oxomoc_import():
@@ -192,6 +213,13 @@ def create_checkpoint(
     metadata = cfg.get("metadataPrefix", "oai_dc")
     # Always call the non-selective create signature; selective mode removed.
     ckp.create(cfg["url"], mongo_db, endpoint_name, metadata)
+    if mongo_db and any(field in cfg for field in IDENTITY_FIELDS):
+        matched = persist_repository_identity(ckp.client, mongo_db, endpoint_name, cfg)
+        if matched == 0:
+            log.warning(
+                "ROR/OpenAlex source were not persisted because %s_identity does not exist",
+                endpoint_name,
+            )
 
 
 default_args = {

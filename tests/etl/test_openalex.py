@@ -210,6 +210,56 @@ def test_checkpoint_resume(mock_mongo, tmp_snapshot):
     assert mock_mongo["test_openalex"]["sources"].count_documents({}) == 2
 
 
+def test_side_files_are_not_partitions(mock_mongo, tmp_snapshot):
+    """Only ``updated_date=*/part_*.gz`` are loaded; e.g. ``deleted_ids.csv.gz`` is ignored."""
+    _make_snapshot_dir(tmp_snapshot, "sources", [{"id": "S1", "display_name": "A"}])
+    side = tmp_snapshot / "data" / "sources" / "deleted_ids.csv.gz"
+    with gzip.open(side, "wt") as fh:
+        fh.write("work_id,deleted_date\nhttps://openalex.org/S9,2026-08-14\n")
+
+    ext = _make_extractor(str(tmp_snapshot), client=mock_mongo)
+    assert [f.name for f in ext._iter_partition_files()] == ["part_000.gz"]
+    assert ext.run()["total_errors"] == 0
+
+
+def test_bulk_write_error_counts_only_failed_ops():
+    """A BulkWriteError counts its writeErrors, not the whole batch."""
+    from pymongo.errors import BulkWriteError
+
+    from extract.openalex.openalex_extractor import _count_bulk_error
+
+    counts = {"records": 0, "upserted": 0, "modified": 0, "errors": 0}
+    exc = BulkWriteError(
+        {
+            "writeErrors": [{"index": 3, "code": 11000, "errmsg": "E11000 duplicate key"}],
+            "nUpserted": 450,
+            "nModified": 49,
+        }
+    )
+    _count_bulk_error(exc, 500, counts, "works")
+    assert counts == {"records": 0, "upserted": 450, "modified": 49, "errors": 1}
+
+    _count_bulk_error(TimeoutError("boom"), 500, counts, "works")
+    assert counts["errors"] == 501
+
+
+def test_jsonl_layout_preferred_over_legacy(mock_mongo, tmp_snapshot):
+    """``data/jsonl/<entity>`` is used when present; legacy ``data/<entity>`` is ignored."""
+    _make_snapshot_dir(tmp_snapshot, "sources", [{"id": "S_OLD", "display_name": "Legacy"}])
+    new_dir = tmp_snapshot / "data" / "jsonl" / "sources" / "updated_date=2026-10-14"
+    new_dir.mkdir(parents=True, exist_ok=True)
+    with gzip.open(new_dir / "part_0000.gz", "wt") as fh:
+        fh.write(json.dumps({"id": "S_NEW", "display_name": "New"}) + "\n")
+
+    ext = _make_extractor(str(tmp_snapshot), client=mock_mongo)
+    files = ext._iter_partition_files()
+    assert files and all("/data/jsonl/sources/" in str(f) for f in files)
+
+    ext.run()
+    ids = {d["id"] for d in mock_mongo["test_openalex"]["sources"].find({}, {"id": 1})}
+    assert ids == {"S_NEW"}
+
+
 def test_max_workers_respected(mock_mongo, tmp_snapshot):
     """Extractor accepts max_workers param and still produces correct results."""
     records = [{"id": f"S{i}", "display_name": f"Journal {i}"} for i in range(20)]

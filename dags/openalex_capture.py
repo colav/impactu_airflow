@@ -70,6 +70,14 @@ with DAG(
             type="boolean",
             description="Drop the target database before loading (full reload, resets checkpoints)",
         ),
+        "skip_sync": Param(
+            False,
+            type="boolean",
+            description=(
+                "Skip the S3 sync and load the snapshot already on disk "
+                "(e.g. downloaded outside Airflow or no aws CLI in the worker)"
+            ),
+        ),
     },
     schedule=None,
     catchup=False,
@@ -83,12 +91,19 @@ with DAG(
     sync_snapshot = BashOperator(
         task_id="sync_snapshot",
         bash_command=(
+            "{% if params.skip_sync %}"
+            "echo 'skip_sync=true: using snapshot already on disk'"
+            "{% else %}"
             'cd "{{ params.snapshot_base_dir }}" && '
-            "aws s3 sync s3://openalex openalex-snapshot --no-sign-request --delete"
+            "aws s3 sync s3://openalex/data/jsonl openalex-snapshot/data/jsonl "
+            "--no-sign-request --delete"
+            "{% endif %}"
         ),
         doc_md=(
-            "Sync the full OpenAlex S3 snapshot to the local filesystem. "
-            "Only changed/new files are downloaded; deleted files are removed."
+            "Sync the JSONL part of the OpenAlex S3 snapshot to the local filesystem. "
+            "Only changed/new files are downloaded; deleted files are removed. "
+            "``--delete`` is scoped to ``data/jsonl`` so legacy layouts and "
+            "the unused ``data/parquet`` export are never touched."
         ),
     )
 

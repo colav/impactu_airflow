@@ -27,7 +27,6 @@ from config.institutional_capture import (
     DEFAULT_CIARP_CACHE_DIR,
     DEFAULT_DUMP_DIR,
     DEFAULT_GOOGLE_TOKEN_PICKLE,
-    NO_SUBFOLDER_NAME,
 )
 from config.notifications import completion_callbacks
 from extract.base_extractor import BaseExtractor
@@ -549,11 +548,6 @@ def run_ciarp_capture(**kwargs: Any) -> None:
         or Variable.get("ciarp_drive_root_folder_id", default_var=CIARP_DRIVE_ROOT_FOLDER_ID)
         or CIARP_DRIVE_ROOT_FOLDER_ID
     )
-    drive_subfolder_name = params.get("drive_subfolder_name")
-    if drive_subfolder_name is None:
-        drive_subfolder_name = Variable.get(
-            "ciarp_drive_subfolder_name", default_var=NO_SUBFOLDER_NAME
-        )
     dump_dir = params.get("dump_dir") or Variable.get(
         "ciarp_dump_dir", default_var=DEFAULT_DUMP_DIR
     )
@@ -579,7 +573,7 @@ def run_ciarp_capture(**kwargs: Any) -> None:
         mongodb_uri="",
         db_name=db_name,
         drive_root_folder_id=drive_root_folder_id,
-        subfolder_name=drive_subfolder_name or None,
+        subfolder_name=None,
         google_token_pickle=google_token_pickle,
         collection_name="ciarp",
         client=client,
@@ -609,11 +603,6 @@ with DAG(
             type="string",
             description="Google Drive root folder ID containing CIARP files "
             "(override only when running against a different CIARP folder)",
-        ),
-        "drive_subfolder_name": Param(
-            NO_SUBFOLDER_NAME,
-            type="string",
-            description="Optional subfolder name under drive_root_folder_id",
         ),
         "dump_dir": Param(
             DEFAULT_DUMP_DIR,

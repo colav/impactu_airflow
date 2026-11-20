@@ -6,7 +6,13 @@ import mongomock
 import pytest
 from mongomock.collection import BulkOperationBuilder
 
+from config.institutional_capture import (
+    CIARP_DRIVE_ROOT_FOLDER_ID,
+    DEFAULT_GOOGLE_TOKEN_PICKLE,
+)
 from dags.ciarp_capture import CiarpExtractor
+from dags.ciarp_capture import dag as ciarp_dag
+from dags.institutional_data_capture import dag as institutional_dag
 
 # Workaround for mongomock bug with pymongo 4.x bulk_write (seen in some bulk ops)
 # https://github.com/mongomock/mongomock/issues/812
@@ -28,6 +34,19 @@ if hasattr(_builder_cls, "add_replace"):
         return original_add_replace(self, selector, doc, upsert=upsert, **kwargs)
 
     _builder_cls.add_replace = patched_add_replace
+
+
+def test_ciarp_dags_use_direct_institution_folders():
+    ciarp_params = dict(ciarp_dag.params)
+    assert ciarp_params["drive_root_folder_id"] == CIARP_DRIVE_ROOT_FOLDER_ID
+    assert ciarp_params["google_token_pickle"] == DEFAULT_GOOGLE_TOKEN_PICKLE
+    assert "drive_subfolder_name" not in ciarp_params
+
+    institutional_params = dict(institutional_dag.params)
+    assert institutional_params["ciarp_drive_root_folder_id"] == (CIARP_DRIVE_ROOT_FOLDER_ID)
+    trigger_conf = cast(Any, institutional_dag.get_task("trigger_ciarp_capture")).conf
+    assert trigger_conf["drive_root_folder_id"] == ("{{ params.ciarp_drive_root_folder_id }}")
+    assert "drive_subfolder_name" not in trigger_conf
 
 
 @pytest.fixture

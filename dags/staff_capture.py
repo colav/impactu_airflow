@@ -26,7 +26,6 @@ from config.institutional_capture import (
     DEFAULT_DUMP_DIR,
     DEFAULT_GOOGLE_TOKEN_PICKLE,
     DEFAULT_STAFF_CACHE_DIR,
-    NO_SUBFOLDER_NAME,
     STAFF_DRIVE_ROOT_FOLDER_ID,
 )
 from config.notifications import completion_callbacks
@@ -471,11 +470,6 @@ def run_staff_capture(**kwargs: Any) -> None:
         or Variable.get("staff_drive_root_folder_id", default_var=STAFF_DRIVE_ROOT_FOLDER_ID)
         or STAFF_DRIVE_ROOT_FOLDER_ID
     )
-    drive_subfolder_name = params.get("drive_subfolder_name")
-    if drive_subfolder_name is None:
-        drive_subfolder_name = Variable.get(
-            "staff_drive_subfolder_name", default_var=NO_SUBFOLDER_NAME
-        )
     dump_dir = params.get("dump_dir") or Variable.get(
         "staff_dump_dir", default_var=DEFAULT_DUMP_DIR
     )
@@ -501,7 +495,7 @@ def run_staff_capture(**kwargs: Any) -> None:
         mongodb_uri="",
         db_name=db_name,
         drive_root_folder_id=drive_root_folder_id,
-        subfolder_name=drive_subfolder_name or None,
+        subfolder_name=None,
         google_token_pickle=google_token_pickle,
         collection_name="staff",
         client=client,
@@ -531,11 +525,6 @@ with DAG(
             type="string",
             description="Google Drive root folder ID containing institution subfolders "
             "(override only when running against a different STAFF folder)",
-        ),
-        "drive_subfolder_name": Param(
-            NO_SUBFOLDER_NAME,
-            type="string",
-            description="Optional subfolder name under drive_root_folder_id",
         ),
         "dump_dir": Param(
             DEFAULT_DUMP_DIR,
